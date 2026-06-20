@@ -7,12 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .adapters import DEFAULT_HTTP_DEMO_URL, AgentConfig
+from .adapters import DEFAULT_HTTP_DEMO_URL, AgentConfig, check_http_agent
 from .claude_code import ClaudeCodeRemediator
 from .config import load_manifest
 from .patcher import load_trace_for_attack
 from .paths import (
     DEFAULT_AFTER_SUMMARY_PATH,
+    DEFAULT_ATTACK_PACK_PATH,
     DEFAULT_BEFORE_SUMMARY_PATH,
     DEFAULT_GUARDRAILS_PATH,
     DEFAULT_MANIFEST_PATH,
@@ -41,6 +42,10 @@ def main(argv: list[str] | None = None) -> int:
         return reset_command(args)
     if args.command == "dashboard":
         return dashboard_command(args)
+    if args.command == "doctor":
+        return doctor_command(args)
+    if args.command == "init":
+        return init_command(args)
     if args.command == "latest":
         return latest_command(args)
     if args.command == "report":
@@ -64,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--agent-url")
         sub.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
         sub.add_argument("--regressions")
+        sub.add_argument("--attacks", dest="attack_pack")
         sub.add_argument("--traces-root", default=str(TRACES_ROOT))
         sub.add_argument("--attack", action="append", dest="attacks")
         sub.add_argument("--offline", action="store_true", help="Use only local fixtures.")
@@ -85,6 +91,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     reset = subparsers.add_parser("reset")
     reset.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
+
+    doctor = subparsers.add_parser("doctor")
+    doctor.add_argument("--config", default=str(DEFAULT_MANIFEST_PATH))
+    doctor.add_argument("--agent")
+    doctor.add_argument("--agent-url")
+    doctor.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
+    doctor.add_argument("--regressions")
+    doctor.add_argument("--attacks", dest="attack_pack")
+
+    init = subparsers.add_parser("init")
+    init.add_argument("--config", default=str(DEFAULT_MANIFEST_PATH))
+    init.add_argument("--agent", choices=["builtin", "http"], default="builtin")
+    init.add_argument("--agent-url", default=DEFAULT_HTTP_DEMO_URL)
+    init.add_argument("--force", action="store_true")
 
     dashboard = subparsers.add_parser("dashboard")
     dashboard.add_argument("streamlit_args", nargs=argparse.REMAINDER)
@@ -115,11 +135,13 @@ def run_command(args: argparse.Namespace, rerun: bool = False) -> int:
         manifest,
         "regressions",
     )
+    attack_pack_path = _configured_optional_path(args.attack_pack, manifest, "attacks")
     agent_config = _agent_config(args, manifest)
     report = run_suite(
         guardrails_path=guardrails_path,
         traces_root=args.traces_root,
         generated_regressions_path=regressions_path,
+        attack_pack_path=attack_pack_path,
         selected_attack_ids=args.attacks,
         agent_config=agent_config,
         mode=mode,
@@ -201,6 +223,38 @@ def dashboard_command(args: argparse.Namespace) -> int:
     command = [sys.executable, "-m", "streamlit", "run", "redteamci/dashboard.py"]
     command.extend(args.streamlit_args or [])
     return subprocess.call(command)
+
+
+def doctor_command(args: argparse.Namespace) -> int:
+    checks = _doctor_checks(args)
+    for ok, message in checks:
+        marker = "PASS" if ok else "FAIL"
+        print(f"[{marker}] {message}")
+    return 0 if all(ok for ok, _ in checks) else 1
+
+
+def init_command(args: argparse.Namespace) -> int:
+    path = Path(args.config)
+    if path.exists() and not args.force:
+        print(f"{path} already exists. Use --force to overwrite.")
+        return 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"agent: {args.agent}",
+    ]
+    if args.agent == "http":
+        lines.append(f"agent_url: {args.agent_url}")
+    lines.extend(
+        [
+            "guardrails: guardrails.yml",
+            "regressions: regressions/generated_attacks.json",
+            "# attacks: attacks/redteamci_attacks.json",
+            "",
+        ]
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Wrote {path}")
+    return 0
 
 
 def latest_command(args: argparse.Namespace) -> int:
@@ -289,6 +343,20 @@ def _configured_path(
     return str(Path(manifest.get("_base_dir", ".")) / path)
 
 
+def _configured_optional_path(
+    explicit: str | None,
+    manifest: dict[str, str],
+    key: str,
+) -> str | None:
+    value = explicit or manifest.get(key)
+    if not value:
+        return None
+    path = Path(value)
+    if path.is_absolute():
+        return str(path)
+    return str(Path(manifest.get("_base_dir", ".")) / path)
+
+
 def _agent_config(args: argparse.Namespace, manifest: dict[str, str]) -> AgentConfig:
     selected = (args.agent or manifest.get("agent") or "builtin").strip()
     if selected == "http-demo":
@@ -296,6 +364,62 @@ def _agent_config(args: argparse.Namespace, manifest: dict[str, str]) -> AgentCo
     if selected == "http":
         return AgentConfig(kind="http", url=args.agent_url or manifest.get("agent_url"))
     return AgentConfig(kind="builtin")
+
+
+def _doctor_checks(args: argparse.Namespace) -> list[tuple[bool, str]]:
+    manifest_path = Path(args.config)
+    manifest = _load_run_manifest(args.config)
+    checks: list[tuple[bool, str]] = []
+    if manifest_path.exists():
+        checks.append((True, f"Manifest found: {manifest_path}"))
+    else:
+        checks.append((False, f"Manifest not found: {manifest_path}"))
+
+    guardrails_path = Path(
+        _configured_path(args.guardrails, DEFAULT_GUARDRAILS_PATH, manifest, "guardrails")
+    )
+    checks.append(
+        (
+            guardrails_path.exists(),
+            f"Guardrails {'found' if guardrails_path.exists() else 'missing'}: {guardrails_path}",
+        )
+    )
+
+    regressions_path = Path(
+        _configured_path(args.regressions, GENERATED_REGRESSIONS_PATH, manifest, "regressions")
+    )
+    regressions_parent = regressions_path.parent
+    checks.append(
+        (
+            regressions_path.exists() or regressions_parent.exists(),
+            (
+                "Regressions path ready"
+                if regressions_path.exists() or regressions_parent.exists()
+                else "Regressions parent missing"
+            )
+            + f": {regressions_path}",
+        )
+    )
+
+    attack_pack_path = _configured_optional_path(args.attack_pack, manifest, "attacks")
+    if attack_pack_path:
+        path = Path(attack_pack_path)
+        checks.append(
+            (
+                path.exists(),
+                f"Attack pack {'found' if path.exists() else 'missing'}: {path}",
+            )
+        )
+
+    agent_config = _agent_config(args, manifest)
+    if agent_config.kind == "builtin":
+        checks.append((True, "Agent configured: builtin"))
+    elif agent_config.kind == "http":
+        ok, message = check_http_agent(agent_config.url or DEFAULT_HTTP_DEMO_URL)
+        checks.append((ok, message))
+    else:
+        checks.append((False, f"Unsupported agent: {agent_config.kind}"))
+    return checks
 
 
 if __name__ == "__main__":

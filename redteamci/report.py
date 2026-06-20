@@ -32,6 +32,7 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
     patch_summary, patch_diff = _latest_patch()
     generated_regression = _generated_regression_text()
     blocked_events = _blocked_events(after)
+    output_only = _output_only_attacks(after)
     integrations = after.get("integrations", {})
     agent = integrations.get("agent") or before.get("integrations", {}).get("agent", "builtin")
 
@@ -80,6 +81,9 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
             "",
             "## Claude Code Remediation",
             f"Source: {patch_summary.get('source', 'unknown')}",
+            f"Success: {patch_summary.get('success', 'unknown')}",
+            f"Regression test path: {patch_summary.get('regression_test_path')}",
+            f"Failure reason: {patch_summary.get('error')}",
             "",
             "Changed files:",
         ]
@@ -96,6 +100,15 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
             )
     else:
         lines.append("- No blocked tool calls recorded.")
+
+    lines.extend(["", "## External Agent Trace Coverage", ""])
+    if output_only:
+        for attack in output_only:
+            lines.append(
+                f"- {attack['id']}: Output-only evaluation; no tool trace supplied."
+            )
+    else:
+        lines.append("- Tool trace supplied for all recorded attacks.")
 
     lines.extend(
         [
@@ -173,3 +186,11 @@ def _blocked_events(summary: dict[str, Any]) -> list[dict[str, Any]]:
         for tool in attack.get("dangerous_tools_blocked", []):
             events.append({"attack_id": attack["id"], "tool": tool})
     return events
+
+
+def _output_only_attacks(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        attack
+        for attack in summary.get("attacks", [])
+        if attack.get("tool_trace_supplied") is False
+    ]

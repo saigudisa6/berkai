@@ -16,6 +16,7 @@ GUARDRAIL_KEYS = [
 MANIFEST_KEYS = [
     "agent",
     "agent_url",
+    "attacks",
     "guardrails",
     "regressions",
 ]

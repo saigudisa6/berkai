@@ -110,7 +110,7 @@ class ClaudeCodeRemediator:
             regression_test_path=None,
             success=False,
             error="Claude Code CLI is not available.",
-            summary_payload={},
+            summary_payload={"claude_code_available": False, "claude_code_executable": None},
         )
 
     def _fixture_result(
@@ -195,7 +195,10 @@ class ClaudeCodeRemediator:
                 regression_test_path=None,
                 success=False,
                 error="Claude Code dry-run is not supported because acceptEdits mutates files.",
-                summary_payload={},
+                summary_payload={
+                    "claude_code_available": True,
+                    "claude_code_executable": executable,
+                },
             )
         try:
             completed = subprocess.run(
@@ -225,10 +228,10 @@ class ClaudeCodeRemediator:
             if isinstance(exc, subprocess.TimeoutExpired):
                 error = (
                     "Claude Code was installed and invoked, but timed out before "
-                    "producing successful edits."
+                    f"producing successful edits. executable={executable}"
                 )
             else:
-                error = f"{type(exc).__name__}: {exc}"
+                error = _short_error(f"{type(exc).__name__}: {exc}")
             return self._write_result(
                 source="claude_code",
                 attack_id=attack_id,
@@ -238,7 +241,10 @@ class ClaudeCodeRemediator:
                 regression_test_path=None,
                 success=False,
                 error=error,
-                summary_payload={},
+                summary_payload={
+                    "claude_code_available": True,
+                    "claude_code_executable": executable,
+                },
             )
 
         after_guardrails = _read_text(guardrails_path)
@@ -271,9 +277,15 @@ class ClaudeCodeRemediator:
             success=success,
             error=None
             if success
-            else completed.stderr
-            or "Claude Code was installed and invoked, but did not produce successful edits.",
-            summary_payload=payload,
+            else _short_error(
+                completed.stderr
+                or f"Claude Code was installed and invoked, but did not produce successful edits. executable={executable}"
+            ),
+            summary_payload={
+                "claude_code_available": True,
+                "claude_code_executable": executable,
+                **payload,
+            },
         )
 
     def _write_result(
@@ -400,3 +412,10 @@ def _read_json(path: Path) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
+
+
+def _short_error(text: str, limit: int = 500) -> str:
+    text = " ".join(str(text).split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."

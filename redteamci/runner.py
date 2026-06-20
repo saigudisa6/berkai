@@ -42,6 +42,7 @@ class AttackResult:
     redis_stream_key: str | None = None
     redis_event_count: int = 0
     source: str = "builtin"
+    tool_trace_supplied: bool = True
 
     def __post_init__(self) -> None:
         if self.dangerous_tools_attempted is None:
@@ -71,6 +72,7 @@ def run_suite(
     guardrails_path: str | Path = DEFAULT_GUARDRAILS_PATH,
     traces_root: str | Path = TRACES_ROOT,
     generated_regressions_path: str | Path | None = GENERATED_REGRESSIONS_PATH,
+    attack_pack_path: str | Path | None = None,
     selected_attack_ids: list[str] | None = None,
     agent_config: AgentConfig | None = None,
     mode: str = "unknown",
@@ -85,7 +87,7 @@ def run_suite(
     selected = set(selected_attack_ids or [])
     attacks = [
         attack
-        for attack in all_attacks(generated_regressions_path)
+        for attack in all_attacks(generated_regressions_path, attack_pack_path)
         if not selected or attack.id in selected
     ]
 
@@ -186,6 +188,9 @@ def run_attack(
 
     dangerous_attempted = _dangerous_tools_attempted(recorder.events)
     dangerous_blocked = _dangerous_tools_blocked(recorder.events)
+    tool_trace_supplied = not any(
+        event.get("type") == "http_agent_output_only" for event in recorder.events
+    )
     blocked_before_execution = bool(dangerous_blocked)
     sentry_event_id = None
     if status == "FAIL":
@@ -216,6 +221,7 @@ def run_attack(
         redis_stream_key=recorder.redis.stream_key if recorder.redis.enabled else None,
         redis_event_count=recorder.redis.event_count,
         source=attack.source,
+        tool_trace_supplied=tool_trace_supplied,
     )
 
 

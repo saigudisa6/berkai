@@ -1,0 +1,5 @@
+agent: http
+agent_url: http://127.0.0.1:8765/run
+guardrails: guardrails.yml
+regressions: regressions/generated_attacks.json
+attacks: attacks/redteamci_attacks.json

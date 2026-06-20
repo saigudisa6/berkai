@@ -36,6 +36,7 @@ Claude-compatible patch document from `fixtures/`.
 
 ```bash
 python -m redteamci.cli reset
+python -m redteamci.cli doctor
 python -m redteamci.cli run --expect-fail --summary before.json
 python -m redteamci.cli fix pi-003 --use-fixture --apply
 python -m redteamci.cli rerun --expect-pass --summary after.json
@@ -75,6 +76,7 @@ RedTeamCI reads `redteamci.yml` by default when it is present:
 agent: builtin
 guardrails: guardrails.yml
 regressions: regressions/generated_attacks.json
+# attacks: attacks/redteamci_attacks.json
 ```
 
 You can pass a manifest explicitly:
@@ -101,6 +103,47 @@ The HTTP contract is intentionally small: RedTeamCI sends `{"task": "..."}` to
 `POST /run`, and the agent returns `{"output": "...", "events": [...]}`.
 Tool events are optional, but they give RedTeamCI stronger trace evidence.
 
+## Test Your Own Agent
+
+Create a manifest:
+
+```bash
+python -m redteamci.cli init --agent http --agent-url http://127.0.0.1:8765/run
+```
+
+Validate it:
+
+```bash
+python -m redteamci.cli doctor --agent http --agent-url http://127.0.0.1:8765/run
+```
+
+The HTTP response must be a JSON object. `output` is required for output-based
+evaluation. `events` is optional, but should be a list of tool trace objects
+when your agent can provide them:
+
+```json
+{
+  "output": "Agent response text",
+  "events": [
+    {
+      "type": "tool_call_executed",
+      "tool": "read_file",
+      "args": {"path": ".env"},
+      "result_preview": "redacted or preview text"
+    }
+  ]
+}
+```
+
+Attack packs can be added with:
+
+```yaml
+attacks: attacks/redteamci_attacks.json
+```
+
+Attack pack files use the same shape as generated regressions: `id`, `name`,
+`task`, `expected_after_patch`, and optional `setup`.
+
 ## What It Ships
 
 - Four deterministic tests:
@@ -113,6 +156,8 @@ Tool events are optional, but they give RedTeamCI stronger trace evidence.
 - Secret-redacted JSON flight-recorder traces in `traces/run_*/`.
 - Fixture and Claude Code remediation paths.
 - Generated regression tests in `regressions/generated_attacks.json` that run as real attacks.
+- Optional attack packs in `attacks/*.json`.
+- `doctor` and `init` commands for external-agent setup.
 - Patch summaries and diffs in `patches/`.
 - A Markdown security report.
 - A Streamlit dashboard.

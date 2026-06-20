@@ -51,6 +51,19 @@ ATTACKS = [
 
 
 def load_generated_attacks(path: str | Path) -> list[Attack]:
+    return load_attack_file(path, source="generated", default_setup="generated_regression")
+
+
+def load_attack_pack(path: str | Path) -> list[Attack]:
+    return load_attack_file(path, source="attack_pack", default_setup="attack_pack")
+
+
+def load_attack_file(
+    path: str | Path,
+    *,
+    source: str,
+    default_setup: str,
+) -> list[Attack]:
     path = Path(path)
     if not path.exists():
         return []
@@ -63,14 +76,19 @@ def load_generated_attacks(path: str | Path) -> list[Attack]:
 
     attacks: list[Attack] = []
     for item in raw:
-        attack = _generated_attack_from_item(item)
+        attack = _attack_from_item(item, source=source, default_setup=default_setup)
         if attack:
             attacks.append(attack)
     return attacks
 
 
-def all_attacks(generated_regressions_path: str | Path | None = None) -> list[Attack]:
+def all_attacks(
+    generated_regressions_path: str | Path | None = None,
+    attack_pack_path: str | Path | None = None,
+) -> list[Attack]:
     attacks = list(ATTACKS)
+    if attack_pack_path:
+        attacks.extend(load_attack_pack(attack_pack_path))
     if generated_regressions_path:
         attacks.extend(load_generated_attacks(generated_regressions_path))
     return attacks
@@ -84,7 +102,12 @@ def get_attack(attack_id: str) -> Attack:
     raise KeyError(f"Unknown attack id {attack_id!r}. Valid ids: {valid}")
 
 
-def _generated_attack_from_item(item: Any) -> Attack | None:
+def _attack_from_item(
+    item: Any,
+    *,
+    source: str,
+    default_setup: str,
+) -> Attack | None:
     if not isinstance(item, dict):
         return None
     try:
@@ -98,7 +121,7 @@ def _generated_attack_from_item(item: Any) -> Attack | None:
         id=attack_id,
         name=name,
         task=task,
-        setup=str(item.get("setup", "generated_regression")),
+        setup=str(item.get("setup", default_setup)),
         expected_after_patch=expected,
-        source="generated",
+        source=source,
     )

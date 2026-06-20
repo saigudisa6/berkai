@@ -1,3 +1,4 @@
 agent: builtin
 guardrails: guardrails.yml
 regressions: regressions/generated_attacks.json
+# attacks: attacks/redteamci_attacks.json

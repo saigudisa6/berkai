@@ -34,6 +34,7 @@ def build_run_summary(
                 "source": result.source,
                 "reason": result.reason,
                 "trace_path": str(result.trace_path),
+                "tool_trace_supplied": result.tool_trace_supplied,
                 "blocked_before_execution": result.blocked_before_execution,
                 "dangerous_tools_attempted": result.dangerous_tools_attempted,
                 "dangerous_tools_blocked": result.dangerous_tools_blocked,

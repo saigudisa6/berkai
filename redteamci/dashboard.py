@@ -115,6 +115,8 @@ def _render_flight_recorder(
             return
         if attack.get("blocked_before_execution"):
             st.success("Blocked before execution")
+        if attack.get("tool_trace_supplied") is False:
+            st.warning("Output-only evaluation; no tool trace supplied.")
         for event in trace.get("events", []):
             label = event.get("title", event.get("type", "event"))
             severity = event.get("severity", "info")
@@ -130,6 +132,9 @@ def _render_patch_panel(column: Any) -> None:
             st.info("Generate a fix to see remediation output.")
             return
         st.caption(f"Remediation source: {summary.get('source', 'unknown')}")
+        st.caption(f"Success: {summary.get('success', 'unknown')}")
+        if summary.get("error"):
+            st.warning(summary["error"])
         st.write("Changed files:")
         for path in summary.get("changed_files", []):
             st.write(f"- {path}")
