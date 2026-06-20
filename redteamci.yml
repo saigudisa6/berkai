@@ -1,0 +1,3 @@
+agent: builtin
+guardrails: guardrails.yml
+regressions: regressions/generated_attacks.json

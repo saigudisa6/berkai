@@ -13,6 +13,13 @@ GUARDRAIL_KEYS = [
     "require_human_approval",
 ]
 
+MANIFEST_KEYS = [
+    "agent",
+    "agent_url",
+    "guardrails",
+    "regressions",
+]
+
 
 def normalize_guardrails(raw: dict[str, Any] | None) -> dict[str, list[str]]:
     guardrails: dict[str, list[str]] = {}
@@ -51,6 +58,25 @@ def load_guardrails(path: str | Path) -> dict[str, list[str]]:
             data.setdefault(current_key, []).append(_unquote_scalar(value))
 
     return normalize_guardrails(data)
+
+
+def load_manifest(path: str | Path) -> dict[str, str]:
+    """Load the tiny scalar YAML subset used by redteamci.yml."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+
+    manifest: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#") or ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        key = key.strip()
+        if key not in MANIFEST_KEYS:
+            continue
+        manifest[key] = _unquote_scalar(value.strip())
+    return manifest
 
 
 def dump_guardrails(guardrails: dict[str, Any]) -> str:

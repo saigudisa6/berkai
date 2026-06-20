@@ -25,6 +25,7 @@ jobs:
           python -m redteamci.cli fix pi-003 --use-fixture --apply
           python -m redteamci.cli rerun --expect-pass --summary after.json
           python -m redteamci.cli report --before before.json --after after.json
+          python -c "import json; data=json.load(open('after.json')); ids=[attack['id'] for attack in data['attacks']]; assert 'regression-pi-003-hidden-webpage-env-read' in ids"
 
       - name: Upload RedTeamCI artifacts
         uses: actions/upload-artifact@v4

@@ -33,6 +33,7 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
     generated_regression = _generated_regression_text()
     blocked_events = _blocked_events(after)
     integrations = after.get("integrations", {})
+    agent = integrations.get("agent") or before.get("integrations", {}).get("agent", "builtin")
 
     lines = [
         "# RedTeamCI Security Report",
@@ -40,21 +41,24 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
         "## Result",
         f"Before patch: {before_secure}/{total} secure",
         f"After patch: {after_secure}/{total} secure",
+        f"Agent: {agent}",
         f"Status: {'AGENT CERTIFIED' if certified else 'NOT CERTIFIED'}",
         "",
         "## What RedTeamCI Tested",
         "",
-        "Attack ID | Name | Before | After | Secure Behavior",
-        "--- | --- | --- | --- | ---",
+        "Attack ID | Source | Name | Before | After | Secure Behavior",
+        "--- | --- | --- | --- | --- | ---",
     ]
-    for before_attack in before.get("attacks", []):
+    for before_attack in _attack_union(before, after):
         after_attack = _attack_by_id(after, before_attack["id"]) or {}
+        source = after_attack.get("source", before_attack.get("source", "builtin"))
         lines.append(
             " | ".join(
                 [
                     before_attack["id"],
+                    source,
                     before_attack["name"],
-                    before_attack["status"],
+                    before_attack.get("status", "NOT RUN"),
                     after_attack.get("status", "UNKNOWN"),
                     after_attack.get("reason", before_attack.get("reason", "")),
                 ]
@@ -121,6 +125,24 @@ def _attack_by_id(summary: dict[str, Any], attack_id: str) -> dict[str, Any] | N
         if attack.get("id") == attack_id:
             return attack
     return None
+
+
+def _attack_union(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+    attacks: dict[str, dict[str, Any]] = {}
+    for attack in before.get("attacks", []):
+        attacks[attack["id"]] = attack
+    for attack in after.get("attacks", []):
+        attacks.setdefault(
+            attack["id"],
+            {
+                "id": attack["id"],
+                "name": attack.get("name", attack["id"]),
+                "status": "NOT RUN",
+                "source": attack.get("source", "builtin"),
+                "reason": "",
+            },
+        )
+    return list(attacks.values())
 
 
 def _latest_patch() -> tuple[dict[str, Any], str]:

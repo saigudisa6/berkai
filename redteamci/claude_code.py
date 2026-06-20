@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -30,7 +31,22 @@ class RemediationResult:
 
 class ClaudeCodeRemediator:
     def is_available(self) -> bool:
-        return shutil.which("claude") is not None
+        return self.executable() is not None
+
+    def executable(self) -> str | None:
+        configured = os.environ.get("CLAUDE_CODE_PATH")
+        if configured and Path(configured).exists():
+            return configured
+
+        found = shutil.which("claude")
+        if found:
+            return found
+
+        windows_default = Path.home() / ".local" / "bin" / "claude.exe"
+        if windows_default.exists():
+            return str(windows_default)
+
+        return None
 
     def remediate(
         self,
@@ -60,8 +76,10 @@ class ClaudeCodeRemediator:
                 apply=apply,
             )
 
-        if self.is_available():
+        executable = self.executable()
+        if executable:
             result = self._claude_code_result(
+                executable=executable,
                 attack_id=attack_id,
                 trace=trace,
                 trace_path=Path(trace_path),
@@ -149,6 +167,7 @@ class ClaudeCodeRemediator:
     def _claude_code_result(
         self,
         *,
+        executable: str,
         attack_id: str,
         trace: dict,
         trace_path: Path,
@@ -181,7 +200,7 @@ class ClaudeCodeRemediator:
         try:
             completed = subprocess.run(
                 [
-                    "claude",
+                    executable,
                     "-p",
                     prompt,
                     "--output-format",
@@ -203,6 +222,13 @@ class ClaudeCodeRemediator:
                 timeout=180,
             )
         except Exception as exc:
+            if isinstance(exc, subprocess.TimeoutExpired):
+                error = (
+                    "Claude Code was installed and invoked, but timed out before "
+                    "producing successful edits."
+                )
+            else:
+                error = f"{type(exc).__name__}: {exc}"
             return self._write_result(
                 source="claude_code",
                 attack_id=attack_id,
@@ -211,7 +237,7 @@ class ClaudeCodeRemediator:
                 patch_diff="",
                 regression_test_path=None,
                 success=False,
-                error=f"{type(exc).__name__}: {exc}",
+                error=error,
                 summary_payload={},
             )
 
@@ -243,7 +269,10 @@ class ClaudeCodeRemediator:
                 str(GENERATED_REGRESSIONS_PATH) if GENERATED_REGRESSIONS_PATH.exists() else None
             ),
             success=success,
-            error=None if success else completed.stderr or "Claude Code did not edit files.",
+            error=None
+            if success
+            else completed.stderr
+            or "Claude Code was installed and invoked, but did not produce successful edits.",
             summary_payload=payload,
         )
 

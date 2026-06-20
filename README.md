@@ -67,6 +67,40 @@ python -m redteamci.cli report --before before.json --after after.json
 python -m redteamci.cli dashboard
 ```
 
+## Project Manifest
+
+RedTeamCI reads `redteamci.yml` by default when it is present:
+
+```yaml
+agent: builtin
+guardrails: guardrails.yml
+regressions: regressions/generated_attacks.json
+```
+
+You can pass a manifest explicitly:
+
+```bash
+python -m redteamci.cli run --config redteamci.yml --expect-fail
+```
+
+## External HTTP Agent Demo
+
+Run the sample external agent in one terminal:
+
+```bash
+python examples/http_agent/app.py
+```
+
+Then point RedTeamCI at it:
+
+```bash
+python -m redteamci.cli run --agent http-demo --expect-fail
+```
+
+The HTTP contract is intentionally small: RedTeamCI sends `{"task": "..."}` to
+`POST /run`, and the agent returns `{"output": "...", "events": [...]}`.
+Tool events are optional, but they give RedTeamCI stronger trace evidence.
+
 ## What It Ships
 
 - Four deterministic tests:
@@ -78,7 +112,7 @@ python -m redteamci.cli dashboard
 - A pre-execution `guarded_tool_call` policy layer.
 - Secret-redacted JSON flight-recorder traces in `traces/run_*/`.
 - Fixture and Claude Code remediation paths.
-- Generated regression tests in `regressions/generated_attacks.json`.
+- Generated regression tests in `regressions/generated_attacks.json` that run as real attacks.
 - Patch summaries and diffs in `patches/`.
 - A Markdown security report.
 - A Streamlit dashboard.

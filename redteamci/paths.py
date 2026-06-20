@@ -13,6 +13,7 @@ PATCHES_ROOT = ROOT / "patches"
 DEFAULT_BEFORE_SUMMARY_PATH = ROOT / "before.json"
 DEFAULT_AFTER_SUMMARY_PATH = ROOT / "after.json"
 DEFAULT_REPORT_PATH = ROOT / "redteamci_report.md"
+DEFAULT_MANIFEST_PATH = ROOT / "redteamci.yml"
 
 DEFAULT_GUARDRAILS_PATH = ROOT / "guardrails.yml"
 UNSAFE_GUARDRAILS_PATH = ROOT / "guardrails.unsafe.yml"

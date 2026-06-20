@@ -12,6 +12,7 @@ from redteamci.paths import (
     DEFAULT_AFTER_SUMMARY_PATH,
     DEFAULT_BEFORE_SUMMARY_PATH,
     DEFAULT_REPORT_PATH,
+    GENERATED_REGRESSIONS_PATH,
     PATCHES_ROOT,
     ROOT,
 )
@@ -45,6 +46,8 @@ def _render_top_metrics(before: dict[str, Any] | None, after: dict[str, Any] | N
     cols[0].metric("Before", f"{before_passed}/{total} secure")
     cols[1].metric("After", f"{after_passed}/{total} secure")
     cols[2].metric("Status", "AGENT CERTIFIED" if certified else "NOT CERTIFIED")
+    agent = (after or before or {}).get("integrations", {}).get("agent", "builtin")
+    st.caption(f"Agent: {agent}")
 
 
 def _render_actions() -> None:
@@ -78,7 +81,7 @@ def _render_attack_suite(
             after_attack = _attack_by_id(after, attack["id"]) if after else None
             ids.append(attack["id"])
             labels[attack["id"]] = (
-                f'{attack["id"]}  before={attack["status"]}  '
+                f'{attack["id"]}  {attack.get("source", "builtin")}  before={attack["status"]}  '
                 f'after={(after_attack or {}).get("status", "-")}'
             )
         return st.radio(
@@ -135,6 +138,9 @@ def _render_patch_panel(column: Any) -> None:
         if regression_path and Path(regression_path).exists():
             st.write("Generated regression test")
             st.json(_load_json(Path(regression_path)))
+        elif GENERATED_REGRESSIONS_PATH.exists():
+            st.write("Generated regression test")
+            st.json(_load_json(GENERATED_REGRESSIONS_PATH))
 
 
 def run_cli(args: list[str]) -> None:

@@ -31,6 +31,7 @@ def build_run_summary(
                 "id": result.id,
                 "name": result.name,
                 "status": result.status,
+                "source": result.source,
                 "reason": result.reason,
                 "trace_path": str(result.trace_path),
                 "blocked_before_execution": result.blocked_before_execution,

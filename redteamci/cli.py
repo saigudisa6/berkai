@@ -7,12 +7,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .adapters import DEFAULT_HTTP_DEMO_URL, AgentConfig
 from .claude_code import ClaudeCodeRemediator
+from .config import load_manifest
 from .patcher import load_trace_for_attack
 from .paths import (
     DEFAULT_AFTER_SUMMARY_PATH,
     DEFAULT_BEFORE_SUMMARY_PATH,
     DEFAULT_GUARDRAILS_PATH,
+    DEFAULT_MANIFEST_PATH,
     DEFAULT_REPORT_PATH,
     GENERATED_REGRESSIONS_PATH,
     PATCHES_ROOT,
@@ -56,7 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     for command in ["run", "rerun"]:
         sub = subparsers.add_parser(command)
+        sub.add_argument("--config", default=str(DEFAULT_MANIFEST_PATH))
+        sub.add_argument("--agent")
+        sub.add_argument("--agent-url")
         sub.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
+        sub.add_argument("--regressions")
         sub.add_argument("--traces-root", default=str(TRACES_ROOT))
         sub.add_argument("--attack", action="append", dest="attacks")
         sub.add_argument("--offline", action="store_true", help="Use only local fixtures.")
@@ -95,10 +102,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_command(args: argparse.Namespace, rerun: bool = False) -> int:
     mode = "after_patch" if args.expect_pass else "before_patch" if args.expect_fail else "unknown"
+    manifest = _load_run_manifest(args.config)
+    guardrails_path = _configured_path(
+        args.guardrails,
+        DEFAULT_GUARDRAILS_PATH,
+        manifest,
+        "guardrails",
+    )
+    regressions_path = _configured_path(
+        args.regressions,
+        GENERATED_REGRESSIONS_PATH,
+        manifest,
+        "regressions",
+    )
+    agent_config = _agent_config(args, manifest)
     report = run_suite(
-        guardrails_path=args.guardrails,
+        guardrails_path=guardrails_path,
         traces_root=args.traces_root,
+        generated_regressions_path=regressions_path,
         selected_attack_ids=args.attacks,
+        agent_config=agent_config,
         mode=mode,
     )
     if args.summary:
@@ -198,11 +221,14 @@ def report_command(args: argparse.Namespace) -> int:
 def print_run_report(report: RunReport, *, rerun: bool = False) -> None:
     label = "rerun" if rerun else "run"
     print(f"RedTeamCI {report.run_id} ({label})")
+    print(f"Agent: {report.summary.get('integrations', {}).get('agent', 'builtin')}")
     print()
     for result in report.results:
         marker = "PASS" if result.status == "PASS" else "FAIL"
         print(f"[{marker}] {result.id} {result.name}")
         print(f"  {result.summary}")
+        if result.source == "generated":
+            print("  Source: generated regression")
         print()
     print(f"{len(report.failed)} failed, {len(report.passed)} passed")
     print(f"Trace saved to {report.traces_dir}/")
@@ -233,6 +259,43 @@ def _clear_demo_artifacts() -> None:
     for path in [DEFAULT_BEFORE_SUMMARY_PATH, DEFAULT_AFTER_SUMMARY_PATH, DEFAULT_REPORT_PATH]:
         if path.exists():
             path.unlink()
+
+
+def _load_run_manifest(config_path: str | None) -> dict[str, str]:
+    if not config_path:
+        return {}
+    path = Path(config_path)
+    if not path.exists():
+        return {}
+    manifest = load_manifest(path)
+    manifest["_base_dir"] = str(path.parent)
+    return manifest
+
+
+def _configured_path(
+    explicit: str | None,
+    default: Path,
+    manifest: dict[str, str],
+    key: str,
+) -> str:
+    if explicit and Path(explicit) != default:
+        return explicit
+    value = manifest.get(key)
+    if not value:
+        return str(default)
+    path = Path(value)
+    if path.is_absolute():
+        return str(path)
+    return str(Path(manifest.get("_base_dir", ".")) / path)
+
+
+def _agent_config(args: argparse.Namespace, manifest: dict[str, str]) -> AgentConfig:
+    selected = (args.agent or manifest.get("agent") or "builtin").strip()
+    if selected == "http-demo":
+        return AgentConfig(kind="http", url=args.agent_url or DEFAULT_HTTP_DEMO_URL)
+    if selected == "http":
+        return AgentConfig(kind="http", url=args.agent_url or manifest.get("agent_url"))
+    return AgentConfig(kind="builtin")
 
 
 if __name__ == "__main__":

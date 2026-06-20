@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .agent import run_agent
+from .adapters import AgentConfig, run_agent_with_config
 from .attacks import Attack, all_attacks
 from .config import load_guardrails
 from .integrations import capture_failure_if_configured, write_summary_if_configured
-from .paths import DEFAULT_GUARDRAILS_PATH, PATCHES_ROOT, TRACES_ROOT
+from .paths import DEFAULT_GUARDRAILS_PATH, GENERATED_REGRESSIONS_PATH, PATCHES_ROOT, TRACES_ROOT
 from .policy import PolicyViolation
 from .recorder import FlightRecorder
 from .summary import build_run_summary, write_summary
@@ -41,6 +41,7 @@ class AttackResult:
     sentry_event_id: str | None = None
     redis_stream_key: str | None = None
     redis_event_count: int = 0
+    source: str = "builtin"
 
     def __post_init__(self) -> None:
         if self.dangerous_tools_attempted is None:
@@ -69,21 +70,28 @@ def run_suite(
     *,
     guardrails_path: str | Path = DEFAULT_GUARDRAILS_PATH,
     traces_root: str | Path = TRACES_ROOT,
+    generated_regressions_path: str | Path | None = GENERATED_REGRESSIONS_PATH,
     selected_attack_ids: list[str] | None = None,
+    agent_config: AgentConfig | None = None,
     mode: str = "unknown",
 ) -> RunReport:
     guardrails = load_guardrails(guardrails_path)
+    agent_config = agent_config or AgentConfig()
     traces_root = Path(traces_root)
     run_id = next_run_id(traces_root)
     run_dir = traces_root / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     selected = set(selected_attack_ids or [])
-    attacks = [attack for attack in all_attacks() if not selected or attack.id in selected]
+    attacks = [
+        attack
+        for attack in all_attacks(generated_regressions_path)
+        if not selected or attack.id in selected
+    ]
 
     results: list[AttackResult] = []
     for attack in attacks:
-        result = run_attack(attack, guardrails, run_id, run_dir)
+        result = run_attack(attack, guardrails, run_id, run_dir, agent_config)
         results.append(result)
 
     integrations = {
@@ -98,6 +106,7 @@ def run_suite(
             }
         ),
         "claude_code_patch": _latest_patch_summary_path(),
+        "agent": agent_config.label,
     }
     summary = build_run_summary(
         run_id=run_id,
@@ -117,20 +126,27 @@ def run_attack(
     guardrails: dict[str, list[str]],
     run_id: str,
     run_dir: Path,
+    agent_config: AgentConfig | None = None,
 ) -> AttackResult:
+    agent_config = agent_config or AgentConfig()
     recorder = FlightRecorder(run_id, attack.id, attack.name)
     trace_path = run_dir / f"{attack.id}.json"
 
     recorder.log(
         "attack_started",
-        {"content": attack.task, "setup": attack.setup},
+        {
+            "content": attack.task,
+            "setup": attack.setup,
+            "source": attack.source,
+            "agent": agent_config.label,
+        },
         title=attack.name,
         severity="medium",
     )
 
     result_preview: str | None = None
     try:
-        result = run_agent(attack.task, guardrails, recorder)
+        result = run_agent_with_config(attack.task, guardrails, recorder, agent_config)
         result_preview = str(result)[:500]
         status, reason, summary, risky_tool = evaluate_attack(attack, recorder.events, result)
     except PolicyViolation as exc:
@@ -199,6 +215,7 @@ def run_attack(
         sentry_event_id=sentry_event_id,
         redis_stream_key=recorder.redis.stream_key if recorder.redis.enabled else None,
         redis_event_count=recorder.redis.event_count,
+        source=attack.source,
     )
 
 
