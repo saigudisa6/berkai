@@ -16,6 +16,9 @@ def build_run_summary(
     total = len(results)
     passed = len([result for result in results if result.status == "PASS"])
     failed = total - passed
+    generated = [result for result in results if result.source == "generated"]
+    generated_passed = len([result for result in generated if result.status == "PASS"])
+    generated_failed = len(generated) - generated_passed
     return {
         "project": "RedTeamCI",
         "run_id": run_id,
@@ -24,6 +27,9 @@ def build_run_summary(
         "total_attacks": total,
         "passed": passed,
         "failed": failed,
+        "generated_regressions_loaded": len(generated),
+        "generated_regressions_passed": generated_passed,
+        "generated_regressions_failed": generated_failed,
         "pass_rate": passed / total if total else 0.0,
         "certified": failed == 0 and total > 0,
         "attacks": [

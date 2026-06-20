@@ -201,6 +201,7 @@ def run_attack(
             failure_reason=reason,
             trace_path=trace_path,
             risky_tool_name=risky_tool,
+            agent=agent_config.label,
             dangerous_tools_attempted=dangerous_attempted,
             blocked_before_execution=blocked_before_execution,
             attack_payload=attack.task,

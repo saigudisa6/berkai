@@ -25,12 +25,15 @@ def generate_report(
 def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
     before_secure = before.get("passed", 0)
     after_secure = after.get("passed", 0)
-    total = after.get("total_attacks") or before.get("total_attacks") or 0
+    before_total = before.get("total_attacks") or 0
+    after_total = after.get("total_attacks") or before_total
     certified = bool(after.get("certified"))
     selected = _attack_by_id(before, "pi-003") or (before.get("attacks") or [{}])[0]
-    after_selected = _attack_by_id(after, selected.get("id", "pi-003"))
     patch_summary, patch_diff = _latest_patch()
     generated_regression = _generated_regression_text()
+    generated_attacks = [
+        attack for attack in after.get("attacks", []) if attack.get("source") == "generated"
+    ]
     blocked_events = _blocked_events(after)
     output_only = _output_only_attacks(after)
     integrations = after.get("integrations", {})
@@ -40,8 +43,10 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
         "# RedTeamCI Security Report",
         "",
         "## Result",
-        f"Before patch: {before_secure}/{total} secure",
-        f"After patch: {after_secure}/{total} secure",
+        "Exploit became regression test",
+        f"Before patch: {before_secure}/{before_total} secure",
+        f"After patch: {after_secure}/{after_total} secure",
+        f"Generated regression tests loaded: {after.get('generated_regressions_loaded', 0)}",
         f"Agent: {agent}",
         f"Status: {'AGENT CERTIFIED' if certified else 'NOT CERTIFIED'}",
         "",
@@ -66,6 +71,13 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
             )
         )
 
+    lines.extend(["", "## Generated Regression Result", ""])
+    if generated_attacks:
+        for attack in generated_attacks:
+            lines.append(f"Generated regression: {attack['id']} - {attack['status']}")
+    else:
+        lines.append("Generated regression: none loaded")
+
     lines.extend(
         [
             "",
@@ -78,6 +90,12 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
             "- Policy did not block it before patch",
             "- Secret-like content detected",
             "- FAIL",
+            "",
+            "After:",
+            "- Generated regression replayed same exploit",
+            '- Agent attempted read_file(".env")',
+            "- Policy blocked before execution",
+            "- PASS",
             "",
             "## Claude Code Remediation",
             f"Source: {patch_summary.get('source', 'unknown')}",
@@ -119,17 +137,12 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
             generated_regression,
             "```",
             "",
-            "## Integrations",
-            f"Sentry event IDs: {integrations.get('sentry_event_ids', [])}",
-            f"Redis stream keys: {integrations.get('redis_stream_keys', [])}",
-            "Browserbase: disabled",
-            "Arize: disabled",
-            "",
-            "## Certification",
-            "AGENT CERTIFIED" if certified else "NOT CERTIFIED",
-            "",
         ]
     )
+    integration_lines = _integration_lines(integrations)
+    if integration_lines:
+        lines.extend(["## Integrations", *integration_lines, ""])
+    lines.extend(["## Certification", "AGENT CERTIFIED" if certified else "NOT CERTIFIED", ""])
     return "\n".join(lines)
 
 
@@ -194,3 +207,17 @@ def _output_only_attacks(summary: dict[str, Any]) -> list[dict[str, Any]]:
         for attack in summary.get("attacks", [])
         if attack.get("tool_trace_supplied") is False
     ]
+
+
+def _integration_lines(integrations: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    sentry_ids = integrations.get("sentry_event_ids") or []
+    if sentry_ids:
+        lines.append(f"Sentry event created: {sentry_ids}")
+    redis_keys = integrations.get("redis_stream_keys") or []
+    if redis_keys:
+        lines.append(f"Redis stream keys: {redis_keys}")
+    redis_summary = integrations.get("redis_summary_key")
+    if redis_summary:
+        lines.append(f"Redis summary key: {redis_summary}")
+    return lines

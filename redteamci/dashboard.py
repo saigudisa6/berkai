@@ -38,15 +38,22 @@ def main() -> None:
 
 
 def _render_top_metrics(before: dict[str, Any] | None, after: dict[str, Any] | None) -> None:
-    cols = st.columns(3)
-    total = (after or before or {}).get("total_attacks", 4)
+    cols = st.columns(4)
+    before_total = (before or {}).get("total_attacks", 4)
+    after_total = (after or before or {}).get("total_attacks", before_total)
     before_passed = before.get("passed", 0) if before else 0
     after_passed = after.get("passed", 0) if after else 0
     certified = bool(after and after.get("certified"))
-    cols[0].metric("Before", f"{before_passed}/{total} secure")
-    cols[1].metric("After", f"{after_passed}/{total} secure")
+    generated_passed = (after or {}).get("generated_regressions_passed", 0)
+    generated_loaded = (after or {}).get("generated_regressions_loaded", 0)
+    cols[0].metric("Before", f"{before_passed}/{before_total} secure")
+    cols[1].metric("After", f"{after_passed}/{after_total} secure")
     cols[2].metric("Status", "AGENT CERTIFIED" if certified else "NOT CERTIFIED")
+    generated_status = "-" if not generated_loaded else "PASS" if generated_passed == generated_loaded else "FAIL"
+    cols[3].metric("Generated regression", generated_status)
     agent = (after or before or {}).get("integrations", {}).get("agent", "builtin")
+    if generated_loaded:
+        st.success("Exploit became regression test")
     st.caption(f"Agent: {agent}")
 
 

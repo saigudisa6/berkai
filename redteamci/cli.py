@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -19,7 +20,9 @@ from .paths import (
     DEFAULT_MANIFEST_PATH,
     DEFAULT_REPORT_PATH,
     GENERATED_REGRESSIONS_PATH,
+    FIXTURES_ROOT,
     PATCHES_ROOT,
+    ROOT,
     TRACES_ROOT,
     UNSAFE_GUARDRAILS_PATH,
 )
@@ -285,6 +288,10 @@ def print_run_report(report: RunReport, *, rerun: bool = False) -> None:
             print("  Source: generated regression")
         print()
     print(f"{len(report.failed)} failed, {len(report.passed)} passed")
+    generated_loaded = int(report.summary.get("generated_regressions_loaded", 0))
+    print(f"Generated regression tests loaded: {generated_loaded}")
+    if generated_loaded:
+        print("Exploit became regression test")
     print(f"Trace saved to {report.traces_dir}/")
     if not report.failed:
         print()
@@ -375,6 +382,8 @@ def _doctor_checks(args: argparse.Namespace) -> list[tuple[bool, str]]:
     else:
         checks.append((False, f"Manifest not found: {manifest_path}"))
 
+    checks.append((True, "Python package importable: redteamci"))
+
     guardrails_path = Path(
         _configured_path(args.guardrails, DEFAULT_GUARDRAILS_PATH, manifest, "guardrails")
     )
@@ -382,6 +391,24 @@ def _doctor_checks(args: argparse.Namespace) -> list[tuple[bool, str]]:
         (
             guardrails_path.exists(),
             f"Guardrails {'found' if guardrails_path.exists() else 'missing'}: {guardrails_path}",
+        )
+    )
+    checks.append(
+        (
+            UNSAFE_GUARDRAILS_PATH.exists(),
+            (
+                "Unsafe guardrails found"
+                if UNSAFE_GUARDRAILS_PATH.exists()
+                else "Unsafe guardrails missing"
+            )
+            + f": {UNSAFE_GUARDRAILS_PATH}",
+        )
+    )
+    fixture_path = FIXTURES_ROOT / "claude_pi003_patch.json"
+    checks.append(
+        (
+            fixture_path.exists(),
+            f"Fixture patch {'found' if fixture_path.exists() else 'missing'}: {fixture_path}",
         )
     )
 
@@ -400,6 +427,36 @@ def _doctor_checks(args: argparse.Namespace) -> list[tuple[bool, str]]:
             + f": {regressions_path}",
         )
     )
+    workflow_path = ROOT / ".github" / "workflows" / "redteamci.yml"
+    checks.append(
+        (
+            workflow_path.exists(),
+            f"GitHub Actions workflow {'found' if workflow_path.exists() else 'missing'}: {workflow_path}",
+        )
+    )
+    streamlit_available = importlib.util.find_spec("streamlit") is not None
+    checks.append(
+        (
+            streamlit_available,
+            "Streamlit importable" if streamlit_available else "Streamlit not installed",
+        )
+    )
+    claude_available = shutil.which("claude") is not None or (
+        Path.home() / ".local" / "bin" / "claude.exe"
+    ).exists()
+    checks.append(
+        (
+            True,
+            (
+                "Claude CLI available"
+                if claude_available
+                else "Claude CLI unavailable; fixture fallback available"
+            ),
+        )
+    )
+    report_path = DEFAULT_REPORT_PATH
+    if report_path.exists():
+        checks.append((True, f"Last report found: {report_path}"))
 
     attack_pack_path = _configured_optional_path(args.attack_pack, manifest, "attacks")
     if attack_pack_path:

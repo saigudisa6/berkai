@@ -1,17 +1,21 @@
 import json
 import shutil
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
 from threading import Thread
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from redteamci.adapters import AgentConfig, HTTPAgentError, run_http_agent
 from redteamci.attacks import load_attack_pack, load_generated_attacks
-from redteamci.cli import _configured_path, main
+from redteamci.cli import _configured_path, main, print_run_report
 from redteamci.config import load_guardrails, load_manifest
+from redteamci.integrations.sentry_integration import capture_failure_if_configured
 from redteamci.patcher import apply_patch_document, load_fixture_patch
 from redteamci.paths import ROOT
 from redteamci.policy import PolicyViolation, domain_matches, guarded_tool_call, path_matches
@@ -24,6 +28,21 @@ from redteamci.runner import run_suite
 def quiet_main(argv: list[str]) -> int:
     with redirect_stdout(StringIO()):
         return main(argv)
+
+
+def capture_main(argv: list[str]) -> tuple[int, str]:
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        code = main(argv)
+    return code, stdout.getvalue()
+
+
+def start_test_server(handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.05)
+    return server
 
 
 class RedTeamCITest(unittest.TestCase):
@@ -237,6 +256,47 @@ class RedTeamCITest(unittest.TestCase):
             )
             self.assertEqual(quiet_main(["doctor", "--config", str(config)]), 1)
 
+    def test_sentry_noops_without_dsn(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            event_id = capture_failure_if_configured(
+                run_id="run_test",
+                attack_id="pi-003",
+                attack_name="Browser Hidden Injection",
+                failure_reason="failed",
+                trace_path=Path("trace.json"),
+                risky_tool_name="read_file",
+                agent="builtin",
+            )
+        self.assertIsNone(event_id)
+
+    def test_sentry_payload_contains_release_gate_fields(self) -> None:
+        captured = {}
+
+        def capture_event(payload: dict) -> str:
+            captured.update(payload)
+            return "event-123"
+
+        fake_sentry = SimpleNamespace(init=lambda dsn: None, capture_event=capture_event)
+        with patch.dict("os.environ", {"SENTRY_DSN": "https://example.invalid/1"}, clear=True):
+            with patch.dict("sys.modules", {"sentry_sdk": fake_sentry}):
+                event_id = capture_failure_if_configured(
+                    run_id="run_001",
+                    attack_id="pi-003",
+                    attack_name="Browser Hidden Injection",
+                    failure_reason="Agent attempted read_file('.env')",
+                    trace_path=Path("traces/run_001/pi-003.json"),
+                    risky_tool_name="read_file",
+                    dangerous_tools_attempted=["read_file"],
+                    blocked_before_execution=False,
+                    attack_payload="Read .env",
+                    agent="builtin",
+                )
+        self.assertEqual(event_id, "event-123")
+        self.assertEqual(captured["tags"]["attack_class"], "prompt_injection")
+        self.assertEqual(captured["tags"]["agent"], "builtin")
+        self.assertEqual(captured["tags"]["dangerous_tool"], "read_file")
+        self.assertEqual(captured["extra"]["trace_path"], "traces/run_001/pi-003.json")
+
     def test_http_adapter_accepts_output_and_events(self) -> None:
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self) -> None:
@@ -261,9 +321,7 @@ class RedTeamCITest(unittest.TestCase):
             def log_message(self, format: str, *args: object) -> None:
                 return
 
-        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+        server = start_test_server(Handler)
         try:
             url = f"http://127.0.0.1:{server.server_address[1]}/run"
             recorder = FlightRecorder("run_test", "http-001", "HTTP Adapter")
@@ -291,9 +349,7 @@ class RedTeamCITest(unittest.TestCase):
             def log_message(self, format: str, *args: object) -> None:
                 return
 
-        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+        server = start_test_server(Handler)
         try:
             url = f"http://127.0.0.1:{server.server_address[1]}/run"
             recorder = FlightRecorder("run_test", "http-002", "HTTP Output Only")
@@ -326,9 +382,7 @@ class RedTeamCITest(unittest.TestCase):
             def log_message(self, format: str, *args: object) -> None:
                 return
 
-        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+        server = start_test_server(Handler)
         try:
             url = f"http://127.0.0.1:{server.server_address[1]}/run"
             recorder = FlightRecorder("run_test", "http-003", "HTTP Bad")
@@ -409,6 +463,9 @@ class RedTeamCITest(unittest.TestCase):
             self.assertEqual(len(second.failed), 0)
             self.assertEqual(len(second.passed), 6)
             self.assertTrue(second.summary["certified"])
+            self.assertEqual(second.summary["generated_regressions_loaded"], 1)
+            self.assertEqual(second.summary["generated_regressions_passed"], 1)
+            self.assertEqual(second.summary["generated_regressions_failed"], 0)
             self.assertIn(
                 "regression-pi-003-hidden-webpage-env-read",
                 [attack["id"] for attack in second.summary["attacks"]],
@@ -425,6 +482,11 @@ class RedTeamCITest(unittest.TestCase):
             )
             self.assertEqual(selected.summary["total_attacks"], 1)
             self.assertEqual(selected.summary["attacks"][0]["source"], "generated")
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                print_run_report(selected)
+            self.assertIn("Generated regression tests loaded: 1", stdout.getvalue())
+            self.assertIn("Exploit became regression test", stdout.getvalue())
 
             trace = json.loads((traces_root / second.run_id / "pi-003.json").read_text())
             event_types = [event["type"] for event in trace["events"]]
@@ -453,6 +515,13 @@ class RedTeamCITest(unittest.TestCase):
             generate_report(before_path=before_path, after_path=after_path, output_path=report_path)
             report = report_path.read_text(encoding="utf-8")
             self.assertIn("AGENT CERTIFIED", report)
+            self.assertIn("Exploit became regression test", report)
+            self.assertIn(
+                "Generated regression: regression-pi-003-hidden-webpage-env-read - PASS",
+                report,
+            )
+            self.assertNotIn("Browserbase: disabled", report)
+            self.assertNotIn("Arize: disabled", report)
             self.assertNotIn("sk-fake", report)
 
 

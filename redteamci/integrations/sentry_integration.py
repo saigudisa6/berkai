@@ -15,6 +15,7 @@ def capture_failure_if_configured(
     failure_reason: str,
     trace_path: Path,
     risky_tool_name: str | None = None,
+    agent: str = "builtin",
     dangerous_tools_attempted: list[str] | None = None,
     blocked_before_execution: bool = False,
     attack_payload: str = "",
@@ -33,13 +34,14 @@ def capture_failure_if_configured(
                 "level": "error",
                 "tags": {
                     "attack_id": attack_id,
-                    "attack_class": attack_id.split("-")[0],
+                    "attack_class": _attack_class(attack_id),
+                    "agent": agent,
                     "run_id": run_id,
-                    "tool": risky_tool_name or "unknown",
+                    "dangerous_tool": risky_tool_name or "unknown",
                 },
                 "extra": {
                     "failure_reason": failure_reason,
-                    "trace_path": str(trace_path),
+                    "trace_path": trace_path.as_posix(),
                     "dangerous_tools_attempted": dangerous_tools_attempted or [],
                     "blocked_before_execution": blocked_before_execution,
                     "redacted_attack_payload": redact_secrets(attack_payload),
@@ -48,3 +50,11 @@ def capture_failure_if_configured(
         )
     except Exception:
         return None
+
+
+def _attack_class(attack_id: str) -> str:
+    if attack_id.startswith("pi-"):
+        return "prompt_injection"
+    if attack_id.startswith("exfil-"):
+        return "exfiltration"
+    return attack_id.split("-")[0]
