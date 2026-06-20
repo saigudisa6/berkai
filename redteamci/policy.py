@@ -5,6 +5,7 @@ import os
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from .redaction import contains_secret_like, redact_secrets
 from .tools import TOOLS
 
 
@@ -57,6 +58,35 @@ def domain_matches(url: str, denied_domains: list[str]) -> tuple[bool, str | Non
     return False, None
 
 
+def is_secret_like_file_path(path: str) -> bool:
+    normalized = _normalize_match_path(path).lower()
+    basename = os.path.basename(normalized)
+    return (
+        ".env" in normalized
+        or basename.endswith(".env")
+        or "secret" in normalized
+        or "token" in normalized
+        or "password" in normalized
+        or "api_key" in normalized
+    )
+
+
+def is_private_key_file_path(path: str) -> bool:
+    normalized = _normalize_match_path(path).lower()
+    return (
+        "id_rsa" in normalized
+        or normalized.endswith(".pem")
+        or ".ssh/" in normalized
+        or "private-key" in normalized
+        or "private_key" in normalized
+    )
+
+
+def is_external_url(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+    return bool(host and host not in {"localhost", "127.0.0.1", "::1"})
+
+
 def guarded_tool_call(
     tool_name: str,
     args: dict[str, Any],
@@ -73,12 +103,25 @@ def guarded_tool_call(
     )
 
     allowed_tools = set(guardrails.get("allowed_tools", []))
+    approvals = set(guardrails.get("require_human_approval", []))
     if allowed_tools and tool_name not in allowed_tools:
         reason = f"BLOCKED before execution: {tool_name} is not in allowed_tools"
         _raise_block(reason, tool_name, args, recorder)
 
     if tool_name == "read_file":
         path = str(args.get("path", ""))
+        if "private_key_file_read" in approvals and is_private_key_file_path(path):
+            reason = (
+                "BLOCKED before execution: private key file read requires "
+                "human approval"
+            )
+            _raise_block(reason, tool_name, args, recorder)
+        if "secret_like_file_read" in approvals and is_secret_like_file_path(path):
+            reason = (
+                "BLOCKED before execution: secret-like file read requires "
+                "human approval"
+            )
+            _raise_block(reason, tool_name, args, recorder)
         denied, matched = path_matches(path, guardrails.get("denied_file_patterns", []))
         if denied:
             reason = (
@@ -89,6 +132,17 @@ def guarded_tool_call(
 
     if tool_name == "http_post":
         url = str(args.get("url", ""))
+        body = str(args.get("body", ""))
+        if (
+            "external_post_with_secret_like_content" in approvals
+            and is_external_url(url)
+            and contains_secret_like(body)
+        ):
+            reason = (
+                "BLOCKED before execution: external POST with secret-like "
+                "content requires human approval"
+            )
+            _raise_block(reason, tool_name, redact_secrets(args), recorder)
         denied, matched = domain_matches(url, guardrails.get("denied_domains", []))
         if denied:
             reason = (
@@ -97,14 +151,13 @@ def guarded_tool_call(
             )
             _raise_block(reason, tool_name, args, recorder)
 
-        body = str(args.get("body", ""))
         for pattern in guardrails.get("denied_secret_patterns", []):
             if pattern and pattern in body:
                 reason = (
                     "BLOCKED before execution: http_post body matched "
                     f"secret pattern {pattern}"
                 )
-                redacted = {"url": url, "body": "[REDACTED]"}
+                redacted = redact_secrets({"url": url, "body": body})
                 _raise_block(reason, tool_name, redacted, recorder)
 
     if tool_name in {"run_shell", "exec"}:

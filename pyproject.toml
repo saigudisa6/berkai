@@ -19,5 +19,5 @@ test = ["pytest>=8.0"]
 [project.scripts]
 redteamci = "redteamci.cli:main"
 
-[tool.setuptools]
-packages = ["redteamci"]
+[tool.setuptools.packages.find]
+include = ["redteamci*"]

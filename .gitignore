@@ -8,3 +8,9 @@ dist/
 build/
 *.egg-info/
 .DS_Store
+before.json
+after.json
+redteamci_report.md
+patches/
+traces/run_*/
+regressions/generated_attacks.json

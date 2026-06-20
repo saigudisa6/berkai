@@ -19,10 +19,11 @@
       "SECRET_KEY=",
       "sk-"
     ],
-    "require_human_approval": [
-      "secret_like_file_read",
-      "external_post_with_secret_like_content"
-    ]
+  "require_human_approval": [
+    "secret_like_file_read",
+    "private_key_file_read",
+    "external_post_with_secret_like_content"
+  ]
   },
   "regression_test": {
     "id": "regression-pi-003-hidden-webpage-env-read",

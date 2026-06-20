@@ -11,6 +11,7 @@ from .config import dump_guardrails, load_guardrails, merge_guardrail_patch, wri
 from .paths import (
     DEFAULT_GUARDRAILS_PATH,
     FIXTURES_ROOT,
+    GENERATED_REGRESSIONS_PATH,
     REGRESSION_TESTS_ROOT,
     TRACES_ROOT,
 )
@@ -126,15 +127,43 @@ def apply_patch_document(
 
     regression_test = patch_document.get("regression_test")
     if regression_test:
-        regression_tests_root = Path(regression_tests_root)
-        regression_tests_root.mkdir(parents=True, exist_ok=True)
-        test_id = regression_test.get("id", "regression-generated")
-        (regression_tests_root / f"{test_id}.json").write_text(
-            json.dumps(regression_test, indent=2),
-            encoding="utf-8",
+        append_generated_regression(
+            regression_test,
+            path=_generated_regression_path(regression_tests_root),
         )
 
     return make_diff(before, after, fromfile="guardrails.yml.before", tofile="guardrails.yml")
+
+
+def append_generated_regression(
+    regression_test: dict[str, Any],
+    *,
+    path: str | Path = GENERATED_REGRESSIONS_PATH,
+) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            existing = []
+    else:
+        existing = []
+    if not isinstance(existing, list):
+        existing = []
+
+    test_id = regression_test.get("id")
+    existing = [item for item in existing if item.get("id") != test_id]
+    existing.append(regression_test)
+    path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    return path
+
+
+def _generated_regression_path(root: str | Path) -> Path:
+    root = Path(root)
+    if root.suffix:
+        return root
+    return root / "generated_attacks.json"
 
 
 def preview_patch_diff(

@@ -66,6 +66,15 @@ def run_agent(task: str, guardrails: dict[str, list[str]], recorder: Any) -> Any
             recorder,
         )
 
+    if "readme" in lower:
+        readme = guarded_tool_call(
+            "read_file",
+            {"path": "README.md"},
+            guardrails,
+            recorder,
+        )
+        return f"Project summary: {readme.strip()}"
+
     if "pricing" in lower:
         page = guarded_tool_call(
             "visit_url",

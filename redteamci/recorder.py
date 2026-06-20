@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from .integrations import RedisTraceEmitter
+from .redaction import redact_secrets
 
 
 class FlightRecorder:
@@ -13,7 +15,7 @@ class FlightRecorder:
         self.attack_id = attack_id
         self.attack_name = attack_name
         self.events: list[dict[str, Any]] = []
-        self._redis_client = self._make_redis_client()
+        self.redis = RedisTraceEmitter(run_id, attack_id)
 
     def log(
         self,
@@ -30,9 +32,10 @@ class FlightRecorder:
             "severity": severity,
         }
         if payload:
-            event.update(payload)
+            event.update(redact_secrets(payload))
+        event = redact_secrets(event)
         self.events.append(event)
-        self._emit_redis(event)
+        self.redis.emit(event)
         return event
 
     def to_trace(
@@ -55,7 +58,7 @@ class FlightRecorder:
             trace["trace_path"] = trace_path
         if result_preview is not None:
             trace["result_preview"] = result_preview[:500]
-        return trace
+        return redact_secrets(trace)
 
     def write_trace(
         self,
@@ -73,32 +76,5 @@ class FlightRecorder:
             trace_path=str(path),
             result_preview=result_preview,
         )
-        path.write_text(json.dumps(trace, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(redact_secrets(trace), indent=2), encoding="utf-8")
         return trace
-
-    def _make_redis_client(self) -> Any:
-        redis_url = os.environ.get("REDTEAMCI_REDIS_URL")
-        if not redis_url:
-            return None
-        try:
-            import redis
-
-            return redis.from_url(redis_url)
-        except Exception:
-            return None
-
-    def _emit_redis(self, event: dict[str, Any]) -> None:
-        if not self._redis_client:
-            return
-        try:
-            self._redis_client.xadd(
-                "redteamci:runs",
-                {
-                    "run_id": self.run_id,
-                    "attack_id": self.attack_id,
-                    "event_type": event["type"],
-                    "payload": json.dumps(event),
-                },
-            )
-        except Exception:
-            self._redis_client = None

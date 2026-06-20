@@ -1,0 +1,38 @@
+name: RedTeamCI Agent Security
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  redteamci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run RedTeamCI red-to-green flow
+        run: |
+          python -m redteamci.cli reset
+          python -m redteamci.cli run --expect-fail --summary before.json
+          python -m redteamci.cli fix pi-003 --use-fixture --apply
+          python -m redteamci.cli rerun --expect-pass --summary after.json
+          python -m redteamci.cli report --before before.json --after after.json
+
+      - name: Upload RedTeamCI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: redteamci-security-artifacts
+          path: |
+            redteamci_report.md
+            before.json
+            after.json
+            traces/
+            patches/

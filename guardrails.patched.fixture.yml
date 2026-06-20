@@ -24,4 +24,5 @@ denied_secret_patterns:
 
 require_human_approval:
   - "secret_like_file_read"
+  - "private_key_file_read"
   - "external_post_with_secret_like_content"
