@@ -1,0 +1,13 @@
+allowed_tools:
+  - "read_file"
+  - "list_files"
+  - "visit_url"
+  - "http_post"
+
+denied_file_patterns:
+
+denied_domains:
+
+denied_secret_patterns:
+
+require_human_approval:

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "redteamci"
+version = "0.1.0"
+description = "CI-style adversarial testing for tool-using AI agents."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "RedTeamCI" }]
+dependencies = []
+
+[project.optional-dependencies]
+dashboard = ["streamlit>=1.32"]
+integrations = ["anthropic>=0.34", "redis>=5.0", "sentry-sdk>=1.40"]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+redteamci = "redteamci.cli:main"
+
+[tool.setuptools]
+packages = ["redteamci"]
