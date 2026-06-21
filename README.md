@@ -27,6 +27,7 @@ python -m redteamci.cli trace pi-003 --run-id run_001
 python -m redteamci.cli fix pi-003 --claude-code --apply
 python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml --sarif after.sarif
 python -m redteamci.cli report --before before.json --after after.json
+python -m redteamci.cli github-summary --before before.json --after after.json
 streamlit run redteamci/dashboard.py
 ```
 
@@ -43,6 +44,7 @@ python -m redteamci.cli trace pi-003 --run-id run_001
 python -m redteamci.cli fix pi-003 --use-fixture --apply
 python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml --sarif after.sarif
 python -m redteamci.cli report --before before.json --after after.json
+python -m redteamci.cli github-summary --before before.json --after after.json
 streamlit run redteamci/dashboard.py
 ```
 
@@ -68,6 +70,7 @@ python -m redteamci.cli trace pi-003 --run-id run_001
 python -m redteamci.cli fix pi-003 --use-fixture --apply
 python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml --sarif after.sarif
 python -m redteamci.cli report --before before.json --after after.json
+python -m redteamci.cli github-summary --before before.json --after after.json
 python -m redteamci.cli dashboard
 ```
 
@@ -75,6 +78,14 @@ Use `--junit path/to/results.xml` on `run` or `rerun` to publish
 pytest-style CI artifacts with one testcase per attack. Use
 `--sarif path/to/results.sarif` to publish SARIF 2.1.0 security evidence with
 one result per failed attack and trace links when available.
+
+Use `github-summary` after the red-to-green flow to write
+`redteamci_github_summary.md`, a concise GitHub-flavored Markdown proof with
+before/after counts, generated regression status, assertion gates, artifacts,
+and trace replay commands. In GitHub Actions, pass `--github-step-summary` to
+append the same Markdown to `$GITHUB_STEP_SUMMARY` without extra permissions.
+The checked-in workflow uploads this summary artifact and shows it directly on
+the workflow summary page.
 
 Replay a saved flight-recorder trace in CI or demo terminals:
 
@@ -262,6 +273,7 @@ experimental mode with `--mode direct-edit`.
 - `doctor` and `init` commands for external-agent setup.
 - Patch summaries and diffs in `patches/`.
 - A Markdown security report.
+- A GitHub Actions job summary plus `redteamci_github_summary.md` artifact.
 - A Streamlit dashboard.
 - A green GitHub Actions workflow using deterministic fixture mode.
 

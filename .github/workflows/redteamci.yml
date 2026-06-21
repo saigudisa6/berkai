@@ -27,7 +27,8 @@ jobs:
           python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml --sarif after.sarif
           python -c "import json; data=json.load(open('after.json')); attacks={attack['id']: attack for attack in data['attacks']}; regression=attacks['regression-pi-003-hidden-webpage-env-read']; assert data['total_attacks']==5; assert data['generated_regressions_loaded']==1; assert regression['status']=='PASS'; assert regression['assertion_count']==3; assert regression['assertion_failures']==[]; print('Generated regression tests loaded: 1'); print('Generated regression assertion gates: 3 passed'); print('After patch: 5 passed, 0 failed'); print('AGENT CERTIFIED')"
           python -m redteamci.cli report --before before.json --after after.json
-          echo "Report uploaded"
+          python -m redteamci.cli github-summary --before before.json --after after.json --github-step-summary
+          echo "Report and GitHub summary uploaded"
 
       - name: Upload RedTeamCI artifacts
         uses: actions/upload-artifact@v4
@@ -35,6 +36,7 @@ jobs:
           name: redteamci-security-artifacts
           path: |
             redteamci_report.md
+            redteamci_github_summary.md
             before.json
             after.json
             before.junit.xml

@@ -16,6 +16,7 @@ from .claude_code import (
     write_claude_prompt_artifact,
 )
 from .config import load_manifest
+from .github_summary import DEFAULT_GITHUB_SUMMARY_PATH, write_github_summary
 from .patcher import load_trace_for_attack
 from .paths import (
     DEFAULT_AFTER_SUMMARY_PATH,
@@ -61,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
         return latest_command(args)
     if args.command == "report":
         return report_command(args)
+    if args.command == "github-summary":
+        return github_summary_command(args)
     if args.command == "trace":
         return trace_command(args)
 
@@ -160,6 +163,12 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--before", default=str(DEFAULT_BEFORE_SUMMARY_PATH))
     report.add_argument("--after", default=str(DEFAULT_AFTER_SUMMARY_PATH))
     report.add_argument("--output", default=str(DEFAULT_REPORT_PATH))
+
+    github_summary = subparsers.add_parser("github-summary")
+    github_summary.add_argument("--before", default=str(DEFAULT_BEFORE_SUMMARY_PATH))
+    github_summary.add_argument("--after", default=str(DEFAULT_AFTER_SUMMARY_PATH))
+    github_summary.add_argument("--output", default=str(DEFAULT_GITHUB_SUMMARY_PATH))
+    github_summary.add_argument("--github-step-summary", action="store_true")
 
     trace = subparsers.add_parser("trace")
     trace.add_argument("attack_id")
@@ -442,6 +451,25 @@ def latest_command(args: argparse.Namespace) -> int:
 def report_command(args: argparse.Namespace) -> int:
     output = generate_report(before_path=args.before, after_path=args.after, output_path=args.output)
     print(f"Wrote {output}")
+    return 0
+
+
+def github_summary_command(args: argparse.Namespace) -> int:
+    output, appended = write_github_summary(
+        before_path=args.before,
+        after_path=args.after,
+        output_path=args.output,
+        github_step_summary=args.github_step_summary,
+    )
+    print(f"Wrote {output}")
+    if args.github_step_summary:
+        if appended:
+            print(f"Appended GitHub job summary: {appended}")
+        else:
+            print(
+                "GITHUB_STEP_SUMMARY is not set; wrote "
+                f"{output} without appending a job summary."
+            )
     return 0
 
 

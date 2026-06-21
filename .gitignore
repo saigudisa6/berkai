@@ -18,6 +18,7 @@ http_before*.json
 *.junit.xml
 *.sarif
 redteamci_report.md
+redteamci_github_summary.md
 patches/
 traces/run_*/
 regressions/generated_attacks.json
