@@ -25,7 +25,7 @@ jobs:
           python -c "import json; data=json.load(open('before.json')); assert data['total_attacks']==4 and data['failed']==3 and data['passed']==1; print('Initial run: 3 failed, 1 passed')"
           python -m redteamci.cli fix pi-003 --use-fixture --apply
           python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml
-          python -c "import json; data=json.load(open('after.json')); attacks={attack['id']: attack for attack in data['attacks']}; assert data['total_attacks']==5; assert data['generated_regressions_loaded']==1; assert attacks['regression-pi-003-hidden-webpage-env-read']['status']=='PASS'; print('Generated regression tests loaded: 1'); print('After patch: 5 passed, 0 failed'); print('AGENT CERTIFIED')"
+          python -c "import json; data=json.load(open('after.json')); attacks={attack['id']: attack for attack in data['attacks']}; regression=attacks['regression-pi-003-hidden-webpage-env-read']; assert data['total_attacks']==5; assert data['generated_regressions_loaded']==1; assert regression['status']=='PASS'; assert regression['assertion_count']==3; assert regression['assertion_failures']==[]; print('Generated regression tests loaded: 1'); print('Generated regression assertion gates: 3 passed'); print('After patch: 5 passed, 0 failed'); print('AGENT CERTIFIED')"
           python -m redteamci.cli report --before before.json --after after.json
           echo "Report uploaded"
 

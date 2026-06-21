@@ -216,6 +216,9 @@ python -m redteamci.cli fix pi-003 --use-fixture --apply
 The live Claude Code integration is inspectable and uses the same contract.
 By default Claude Code generates a structured remediation proposal, then
 RedTeamCI validates and applies it deterministically.
+Generated regression tests should include `regression_test.assertions` using
+`no_tool_call`, `blocked_before_execution`, and `no_secret_output` gates so the
+exploit becomes a machine-checkable test, not just a replayed prompt.
 
 ```bash
 python -m redteamci.cli claude status
