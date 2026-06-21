@@ -33,6 +33,13 @@ ATTACK_PLAN_MARKDOWN_FILE = "attack_plan.md"
 LEVEL_1_WARNING = (
     "Level 1 trace/report/proposal only; no forced blocking unless the agent uses guarded tools."
 )
+SUPPORT_STORY_RELATIVE_ROOT = Path(".demo") / "support-story"
+SUPPORT_STORY_ATTACKS = [
+    "generated-refund-001",
+    "generated-email-001",
+    "generated-pii-001",
+    "regression-generated-refund-001",
+]
 
 
 def main() -> None:
@@ -41,16 +48,20 @@ def main() -> None:
     st.title("RedTeamCI")
     st.caption("Crash-test your AI agent before production.")
 
-    before = _load_optional_summary(DEFAULT_BEFORE_SUMMARY_PATH)
-    after = _load_optional_summary(DEFAULT_AFTER_SUMMARY_PATH)
-    _render_top_metrics(before, after)
-    _render_demo_mode_actions()
-    _render_generated_plan_panel(load_generated_plan_panel(ROOT))
+    story_tab, suite_tab = st.tabs(["Support Story", "General Suite"])
+    with story_tab:
+        _render_support_story_mode()
+    with suite_tab:
+        before = _load_optional_summary(DEFAULT_BEFORE_SUMMARY_PATH)
+        after = _load_optional_summary(DEFAULT_AFTER_SUMMARY_PATH)
+        _render_top_metrics(before, after)
+        _render_demo_mode_actions()
+        _render_generated_plan_panel(load_generated_plan_panel(ROOT))
 
-    left, middle, right = st.columns([1.3, 2.2, 2.2])
-    selected_attack = _render_attack_suite(left, before, after)
-    _render_flight_recorder(middle, selected_attack, before, after)
-    _render_patch_panel(right)
+        left, middle, right = st.columns([1.3, 2.2, 2.2])
+        selected_attack = _render_attack_suite(left, before, after)
+        _render_flight_recorder(middle, selected_attack, before, after)
+        _render_patch_panel(right)
 
 
 def _require_streamlit() -> Any:
@@ -82,6 +93,100 @@ def _render_top_metrics(before: dict[str, Any] | None, after: dict[str, Any] | N
 def _render_demo_mode_actions() -> None:
     st.subheader("Demo Mode")
     _render_actions()
+
+
+def _render_support_story_mode() -> None:
+    state = load_support_story_dashboard_state(ROOT)
+    proof = state["proof"]
+    certified = support_story_certified(proof)
+
+    cols = st.columns(4)
+    red = state["red_summary"] or {}
+    green = state["green_summary"] or {}
+    cols[0].metric("Red rehearsal", _summary_status(red, expected_failure=True))
+    cols[1].metric("Green rehearsal", _summary_status(green))
+    cols[2].metric("Proof", "AGENT CERTIFIED" if certified else "NOT CERTIFIED")
+    cols[3].metric(
+        "Regression",
+        "PASS" if proof.get("regression_loaded_and_passed") else "-",
+    )
+
+    if certified:
+        st.success(
+            "AGENT CERTIFIED: unsafe refund executed in red, blocked before "
+            "execution in green, and locked as a regression."
+        )
+    elif state["available"]:
+        st.warning("Support story artifacts found, but final proof is not certified yet.")
+    else:
+        st.info("Run the support story to create replayable red/green evidence.")
+
+    first_row = st.columns(4)
+    if first_row[0].button("Run Full Story", use_container_width=True):
+        run_cli(["story", "support", "--step", "full"])
+    if first_row[1].button("Profile Agent", use_container_width=True):
+        run_cli(["story", "support", "--step", "prepare"])
+    if first_row[2].button("Generate Tests", use_container_width=True):
+        run_cli(["story", "support", "--step", "plan"])
+    if first_row[3].button("Replay Refund Trace", use_container_width=True):
+        run_cli(
+            [
+                "story",
+                "support",
+                "--step",
+                "trace",
+                "--phase",
+                "green",
+                "--attack",
+                "generated-refund-001",
+            ]
+        )
+
+    second_row = st.columns(3)
+    if second_row[0].button("Run Red", use_container_width=True):
+        run_cli(["story", "support", "--step", "red"])
+    if second_row[1].button("Apply Remediation", use_container_width=True):
+        run_cli(["story", "support", "--step", "remediate"])
+    if second_row[2].button("Run Green", use_container_width=True):
+        run_cli(["story", "support", "--step", "green"])
+
+    left, middle, right = st.columns([1.1, 1.4, 1.5])
+    with left:
+        st.subheader("Final Proof")
+        _render_proof_rows(proof)
+        st.subheader("Artifacts")
+        if state["artifacts"]:
+            for artifact in state["artifacts"]:
+                st.caption(f"{artifact['label']}: {artifact['path']}")
+        else:
+            st.caption("No support-story artifacts yet.")
+
+    with middle:
+        st.subheader("Generated Tests")
+        attack_pack = state["attack_pack"]
+        if attack_pack:
+            st.json(attack_pack)
+        else:
+            st.info("Generate tests to populate the support attack pack.")
+
+    with right:
+        st.subheader("Flight Recorder")
+        phase = st.radio("Story phase", ["red", "green"], horizontal=True)
+        attack_id = st.selectbox("Story attack", SUPPORT_STORY_ATTACKS, index=0)
+        trace = load_story_trace(ROOT, phase, attack_id)
+        if not trace:
+            st.info("Run the selected phase to create this trace.")
+        else:
+            for event in trace.get("events", []):
+                label = event.get("title", event.get("type", "event"))
+                severity = event.get("severity", "info")
+                with st.expander(f"{severity.upper()} - {label}"):
+                    st.json(event)
+
+    st.caption(
+        "GitHub demo mode: workflow_dispatch scenario=support-story mode=red "
+        "should fail the check; mode=green should pass after remediation."
+    )
 
 
 def _render_actions() -> None:
@@ -205,6 +310,41 @@ def load_generated_plan_panel(root: Path = ROOT) -> dict[str, Any]:
     }
 
 
+def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
+    root = Path(root)
+    story_root = root / SUPPORT_STORY_RELATIVE_ROOT
+    red_summary = _load_json_object(story_root / "red" / "summary.json")
+    green_summary = _load_json_object(story_root / "green" / "summary.json")
+    state = _load_json_object(story_root / "state.json") or {}
+    proof = state.get("proof") if isinstance(state.get("proof"), dict) else {}
+    attack_pack = _load_json(story_root / "plan" / "generated_support_attacks.json")
+    if not isinstance(attack_pack, list):
+        attack_pack = []
+    artifacts = _support_story_artifacts(root)
+    return {
+        "available": story_root.exists(),
+        "state": state,
+        "proof": proof,
+        "red_summary": red_summary,
+        "green_summary": green_summary,
+        "attack_pack": attack_pack,
+        "artifacts": artifacts,
+    }
+
+
+def support_story_certified(proof: dict[str, Any]) -> bool:
+    return all(
+        [
+            proof.get("red_refund_executed"),
+            proof.get("green_refund_attempted"),
+            proof.get("green_refund_blocked"),
+            proof.get("green_blocked_before_execution_assertion_passed"),
+            proof.get("regression_loaded_and_passed"),
+            int(proof.get("green_failed", 1)) == 0,
+        ]
+    )
+
+
 def onboarding_level_notice(level: int, uses_guarded_gateway: bool = False) -> dict[str, str]:
     if level >= 2 or uses_guarded_gateway:
         return {
@@ -248,6 +388,76 @@ def collect_evidence_artifacts(root: Path = ROOT) -> list[dict[str, str]]:
         for path in patch_artifacts[-8:]:
             artifacts.append(("Claude artifact", path))
 
+    return [
+        {"label": label, "path": _display_path(path, root)}
+        for label, path in artifacts
+        if path.exists()
+    ]
+
+
+def load_story_trace(root: Path, phase: str, attack_id: str) -> dict[str, Any] | None:
+    traces_root = Path(root) / SUPPORT_STORY_RELATIVE_ROOT / phase / "traces"
+    if not traces_root.exists():
+        return None
+    run_dirs = sorted(
+        [path for path in traces_root.glob("run_*") if path.is_dir()],
+        key=lambda path: path.stat().st_mtime,
+    )
+    if not run_dirs:
+        return None
+    trace = _load_json(run_dirs[-1] / f"{attack_id}.json")
+    return trace if isinstance(trace, dict) else None
+
+
+def _summary_status(summary: dict[str, Any], *, expected_failure: bool = False) -> str:
+    if not summary:
+        return "-"
+    failed = int(summary.get("failed", 0))
+    passed = int(summary.get("passed", 0))
+    if expected_failure:
+        return f"{failed} findings" if failed else "no findings"
+    return "PASS" if failed == 0 and passed else "FAIL"
+
+
+def _render_proof_rows(proof: dict[str, Any]) -> None:
+    rows = [
+        ("red refund executed", proof.get("red_refund_executed")),
+        ("green refund attempted", proof.get("green_refund_attempted")),
+        ("green refund blocked", proof.get("green_refund_blocked")),
+        (
+            "blocked-before-execution assertion",
+            proof.get("green_blocked_before_execution_assertion_passed"),
+        ),
+        ("regression loaded and passed", proof.get("regression_loaded_and_passed")),
+        ("green failures", int(proof.get("green_failed", 1)) == 0),
+    ]
+    if not proof:
+        st.caption("No final proof yet.")
+        return
+    for label, ok in rows:
+        if ok:
+            st.success(label)
+        else:
+            st.error(label)
+
+
+def _support_story_artifacts(root: Path) -> list[dict[str, str]]:
+    story_root = root / SUPPORT_STORY_RELATIVE_ROOT
+    artifacts: list[tuple[str, Path]] = [
+        ("State", story_root / "state.json"),
+        ("Attack plan", story_root / "plan" / "attack_plan.json"),
+        ("Attack pack", story_root / "plan" / "generated_support_attacks.json"),
+        ("Red summary", story_root / "red" / "summary.json"),
+        ("Green summary", story_root / "green" / "summary.json"),
+        ("Patch summary", story_root / "patches" / "support_story_summary.json"),
+        ("Patch diff", story_root / "patches" / "support_story.diff"),
+        ("Regression", story_root / "regressions" / "generated_attacks.json"),
+    ]
+    for phase in ["red", "green"]:
+        traces = story_root / phase / "traces"
+        if traces.exists():
+            for path in sorted(traces.glob("run_*/*.json"))[-6:]:
+                artifacts.append((f"{phase.title()} trace", path))
     return [
         {"label": label, "path": _display_path(path, root)}
         for label, path in artifacts

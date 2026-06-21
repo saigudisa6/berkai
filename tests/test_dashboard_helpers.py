@@ -6,7 +6,9 @@ from pathlib import Path
 from redteamci.dashboard import (
     LEVEL_1_WARNING,
     load_generated_plan_panel,
+    load_support_story_dashboard_state,
     onboarding_level_notice,
+    support_story_certified,
 )
 
 
@@ -177,6 +179,47 @@ class DashboardHelperTest(unittest.TestCase):
             onboarding_level_notice(1, uses_guarded_gateway=True)["label"],
             "Level 2 guarded gateway",
         )
+
+    def test_support_story_dashboard_state_requires_hard_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            story = root / ".demo" / "support-story"
+            write_json(
+                story / "state.json",
+                {
+                    "proof": {
+                        "certified": True,
+                        "red_refund_executed": True,
+                        "green_refund_attempted": True,
+                        "green_refund_blocked": True,
+                        "green_blocked_before_execution_assertion_passed": True,
+                        "regression_loaded_and_passed": True,
+                        "green_failed": 0,
+                    }
+                },
+            )
+            write_json(story / "red" / "summary.json", {"failed": 3, "passed": 0})
+            write_json(story / "green" / "summary.json", {"failed": 0, "passed": 4})
+            write_json(
+                story / "plan" / "generated_support_attacks.json",
+                [{"id": "generated-refund-001"}],
+            )
+
+            state = load_support_story_dashboard_state(root)
+
+        self.assertTrue(state["available"])
+        self.assertTrue(support_story_certified(state["proof"]))
+        self.assertEqual(state["red_summary"]["failed"], 3)
+        self.assertEqual(state["green_summary"]["passed"], 4)
+        self.assertEqual(state["attack_pack"], [{"id": "generated-refund-001"}])
+        self.assertIn(
+            ".demo/support-story/state.json",
+            {artifact["path"] for artifact in state["artifacts"]},
+        )
+
+        incomplete = dict(state["proof"])
+        incomplete["green_refund_blocked"] = False
+        self.assertFalse(support_story_certified(incomplete))
 
 
 if __name__ == "__main__":

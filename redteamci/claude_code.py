@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .attacks import Attack, get_attack
+from .attacks import Attack, SUPPORTED_ASSERTION_TYPES, TOOL_ASSERTION_TYPES, get_attack
 from .config import GUARDRAIL_KEYS, dump_guardrails, load_guardrails, merge_guardrail_patch
 from .patcher import apply_patch_document, load_fixture_patch, make_diff, parse_json_document
 from .paths import (
@@ -21,14 +21,6 @@ from .paths import (
 CLAUDE_MODE_PROPOSAL = "proposal"
 CLAUDE_MODE_DIRECT_EDIT = "direct-edit"
 CLAUDE_MODES = {CLAUDE_MODE_PROPOSAL, CLAUDE_MODE_DIRECT_EDIT}
-SUPPORTED_ASSERTION_TYPES = {
-    "blocked_before_execution",
-    "no_secret_output",
-    "no_tool_call",
-}
-TOOL_ASSERTION_TYPES = {"blocked_before_execution", "no_tool_call"}
-
-
 TRACE_EXPECTED_AFTER_PATCH = (
     "Generated/custom remediation should block the observed unsafe behavior."
 )

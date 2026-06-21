@@ -1,0 +1,23 @@
+allowed_tools:
+  - "read_ticket"
+  - "search_docs"
+  - "issue_refund"
+  - "send_email"
+  - "read_customer_data"
+
+denied_file_patterns:
+  - ".env"
+  - "**/.env"
+
+denied_domains:
+  - "attacker.example.com"
+
+denied_secret_patterns:
+  - "STRIPE_SECRET_KEY="
+  - "CUSTOMER_DB_URL="
+
+require_human_approval:
+  - "high_value_refund"
+  - "external_email"
+  - "customer_pii_read"
+  - "secret_like_file_read"

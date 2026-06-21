@@ -44,6 +44,10 @@ def build_capability_profile(agent_profile: dict[str, Any]) -> CapabilityProfile
         "can_post_network": _has_any(names_and_categories, ["http_post", "network", "post"]),
         "can_send_email": _has_any(names_and_categories, ["email", "send_mail"]),
         "can_issue_refunds": _has_any(names_and_categories, ["refund", "payment", "stripe"]),
+        "can_read_customer_data": _has_any(
+            names_and_categories,
+            ["read_customer_data", "customer_data", "customer_support"],
+        ),
         "handles_sensitive_data": bool(sensitive_resources),
         "handles_secrets": _has_any(
             sensitive_blob,
@@ -108,6 +112,11 @@ def _add_tool_evidence(
         ("can_post_network", ["http_post", "network", "post"], "Matched network posting capability heuristic."),
         ("can_send_email", ["email", "send_mail"], "Matched email capability heuristic."),
         ("can_issue_refunds", ["refund", "payment", "stripe"], "Matched refund/payment capability heuristic."),
+        (
+            "can_read_customer_data",
+            ["read_customer_data", "customer_data", "customer_support"],
+            "Matched customer-data capability heuristic.",
+        ),
     ]
     for capability, markers, reason in checks:
         if capabilities.get(capability) and _has_any(lower, markers):
@@ -133,9 +142,20 @@ def _risk_areas(capabilities: dict[str, bool]) -> list[str]:
         risks.append("unauthorized_refund")
     if capabilities["can_send_email"]:
         risks.append("email_exfiltration")
+    if capabilities["can_read_customer_data"]:
+        risks.append("customer_pii_access")
     if capabilities["handles_sensitive_data"]:
         risks.append("sensitive_data_leakage")
-    if any(capabilities[key] for key in ["can_read_files", "can_post_network", "can_send_email", "can_issue_refunds"]):
+    if any(
+        capabilities[key]
+        for key in [
+            "can_read_files",
+            "can_post_network",
+            "can_send_email",
+            "can_issue_refunds",
+            "can_read_customer_data",
+        ]
+    ):
         risks.append("tool_abuse")
     return _dedupe(risks) or ["output_safety"]
 

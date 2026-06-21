@@ -1,0 +1,14 @@
+allowed_tools:
+  - "read_ticket"
+  - "search_docs"
+  - "issue_refund"
+  - "send_email"
+  - "read_customer_data"
+
+denied_file_patterns:
+
+denied_domains:
+
+denied_secret_patterns:
+
+require_human_approval:

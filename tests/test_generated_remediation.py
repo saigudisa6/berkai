@@ -9,6 +9,7 @@ from redteamci.claude_code import (
     attack_context_from_trace,
     build_claude_prompt,
     build_claude_proposal_prompt,
+    validate_patch_document,
 )
 
 
@@ -128,6 +129,19 @@ class GeneratedRemediationTest(unittest.TestCase):
             self.assertFalse(summary["success"])
             self.assertFalse(summary["fixture_fallback_used"])
             self.assertEqual(summary["claude_artifact_path"], result.validation_error_path)
+
+    def test_support_story_fixture_validates_generated_regression(self) -> None:
+        fixture = json.loads(
+            (Path(__file__).resolve().parents[1] / "fixtures" / "claude_support_story_patch.json")
+            .read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(validate_patch_document(fixture), [])
+        self.assertEqual(fixture["regression_test"]["id"], "regression-generated-refund-001")
+        self.assertEqual(
+            [assertion["type"] for assertion in fixture["regression_test"]["assertions"]],
+            ["blocked_before_execution", "no_refund_without_approval"],
+        )
 
 
 if __name__ == "__main__":

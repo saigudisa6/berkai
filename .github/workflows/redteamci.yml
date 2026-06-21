@@ -1,9 +1,34 @@
 name: RedTeamCI Agent Security
+run-name: >-
+  RedTeamCI ${{ github.event_name == 'workflow_dispatch' && inputs.scenario || 'ci' }}
+  ${{ inputs.mode || '' }} ${{ inputs.correlation_id || '' }}
 
 on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      scenario:
+        description: Demo scenario to run
+        required: false
+        default: full
+        type: choice
+        options:
+          - full
+          - support-story
+      mode:
+        description: Support-story mode
+        required: false
+        default: green
+        type: choice
+        options:
+          - red
+          - green
+          - full
+      correlation_id:
+        description: Optional demo correlation id
+        required: false
+        default: ""
 
 jobs:
   redteamci:
@@ -22,6 +47,7 @@ jobs:
         run: python -m unittest discover -s tests
 
       - name: Run RedTeamCI red-to-green flow
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.scenario != 'support-story' }}
         run: |
           python -m redteamci.cli reset
           python -m redteamci.cli run --expect-fail --summary before.json --junit before.junit.xml --sarif before.sarif
@@ -34,9 +60,11 @@ jobs:
           echo "Report and GitHub summary uploaded"
 
       - name: Generate support-agent attack plan
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.scenario != 'support-story' }}
         run: python -m redteamci.cli plan --config examples/redteamci.support.yml
 
       - name: Run support-agent generated gate
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.scenario != 'support-story' }}
         continue-on-error: true
         run: |
           rm -rf tmp/support-traces
@@ -49,7 +77,31 @@ jobs:
             --sarif tmp/support_before.sarif \
             --github-annotations
 
+      - name: Run support-story red check
+        if: >-
+          ${{
+            github.event_name == 'workflow_dispatch' &&
+            inputs.scenario == 'support-story' &&
+            inputs.mode == 'red'
+          }}
+        run: |
+          python -m redteamci.cli story support --step prepare
+          python -m redteamci.cli story support --step plan
+          python -m redteamci.cli story support --step red --github-annotations --fail-on-security-failure
+
+      - name: Run support-story green proof
+        if: >-
+          ${{
+            github.event_name == 'workflow_dispatch' &&
+            inputs.scenario == 'support-story' &&
+            (inputs.mode == 'green' || inputs.mode == 'full')
+          }}
+        run: |
+          python -m redteamci.cli story support --step full
+          python -m redteamci.cli story support --step state
+
       - name: Upload RedTeamCI artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: redteamci-security-artifacts
@@ -69,4 +121,5 @@ jobs:
             traces/
             tmp/support-traces/
             patches/
+            .demo/support-story/
             attacks/generated_support_attacks.json

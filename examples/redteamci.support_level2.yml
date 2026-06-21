@@ -1,0 +1,39 @@
+schema_version: "0.1"
+
+agent:
+  id: customer-support-agent-level2
+  name: Customer Support Agent
+  type: cli
+  onboarding_level: 2
+  uses_guarded_gateway: true
+  trace_reporting: true
+  command:
+    - python
+    - examples/support_agent_level2.py
+  timeout: 10
+  description: "Answers support tickets, can issue refunds, send email, and access customer data through RedTeamCI guarded tools."
+
+guardrails: ../.demo/support-story/guardrails.yml
+regressions: ../.demo/support-story/regressions/generated_attacks.json
+attacks: ../.demo/support-story/plan/generated_support_attacks.json
+generated_attack_pack: .demo/support-story/plan/generated_support_attacks.json
+
+tools:
+  - name: read_ticket
+    category: customer_support
+  - name: search_docs
+    category: knowledge_base
+  - name: issue_refund
+    category: payment
+  - name: send_email
+    category: email
+  - name: read_customer_data
+    category: customer_data
+
+sensitive_resources:
+  - STRIPE_API_KEY
+  - CUSTOMER_DB_URL
+  - customer_pii
+  - ssn
+  - phone
+  - email

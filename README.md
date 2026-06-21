@@ -129,6 +129,56 @@ in CI, record trace evidence, and package a Claude Code remediation prompt.
 Because the support agent is Level 1, this demo claims detection and proposal
 evidence, not forced blocking.
 
+## Level 2 Support Story Demo
+
+Use this for the judged “Claude Code for agent security” story. It profiles a
+support agent, generates refund/email/PII attacks, records a red failure where
+`issue_refund` executes without approval, applies a Claude-compatible
+remediation artifact, reruns green, and proves the refund was attempted but
+blocked before execution. The exploit is also added as a generated regression.
+
+```bash
+python -m redteamci.cli story support --step full
+python -m redteamci.cli story support --step trace --phase red --attack generated-refund-001
+python -m redteamci.cli story support --step trace --phase green --attack generated-refund-001
+streamlit run redteamci/dashboard.py
+```
+
+Expected proof:
+
+```text
+red: 3 failed, 1 passed
+green: 0 failed, 5 passed
+red refund executed: True
+green refund attempted: True
+green refund blocked: True
+blocked-before-execution assertion passed: True
+regression loaded and passed: True
+AGENT CERTIFIED
+```
+
+For a local red rehearsal that records failures but exits successfully:
+
+```bash
+python -m redteamci.cli story support --step prepare
+python -m redteamci.cli story support --step plan
+python -m redteamci.cli story support --step red
+```
+
+For a GitHub check that intentionally fails when the red exploit is found:
+
+```bash
+python -m redteamci.cli story support --step red --github-annotations --fail-on-security-failure
+```
+
+The checked-in workflow also supports manual dispatch:
+
+- `scenario=support-story`, `mode=red`: writes red artifacts and fails the job.
+- `scenario=support-story`, `mode=green`: runs the full red/remediate/green proof and passes.
+
+Support-story artifacts are written under `.demo/support-story/` and ignored by
+git.
+
 ## Commands
 
 ```bash
@@ -418,8 +468,9 @@ Generated attack packs are deterministic JSON, not live LLM output:
 ```
 
 Runtime outputs are ignored by git: `.redteamci/`, `tmp/`, `traces/`,
-`patches/`, `attacks/generated_*_attacks.json`, summary JSON, JUnit, SARIF, and
-generated regression outputs. Curated examples under `examples/` are committed.
+`patches/`, `.demo/`, `attacks/generated_*_attacks.json`, summary JSON, JUnit,
+SARIF, and generated regression outputs. Curated examples under `examples/` are
+committed.
 
 ## Claude Code Integration
 
@@ -478,6 +529,9 @@ fallback.
 - Generated agent profiles, capability profiles, attack plans, and generated
   attack packs for bring-your-own-agent testing.
 - CLI/repo adapter support for Level 1 trace-reporting agents.
+- A Level 2 support-story flow with refund/email/PII generated attacks,
+  red/green replayable traces, a Claude-compatible remediation artifact, and a
+  hard proof gate for blocked-before-execution regression coverage.
 
 ## Tests
 

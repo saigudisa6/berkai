@@ -20,8 +20,10 @@ http_before*.json
 redteamci_report.md
 redteamci_github_summary.md
 .redteamci/
+.demo/
 patches/
 tmp/
 traces/run_*/
 attacks/generated_*_attacks.json
 regressions/generated_attacks.json
+guardrails.support.yml

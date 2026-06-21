@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from .adapters import (
     DEFAULT_HTTP_DEMO_URL,
@@ -85,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
         return trace_command(args)
     if args.command == "plan":
         return plan_command(args)
+    if args.command == "story":
+        return story_command(args)
 
     parser.print_help()
     return 1
@@ -230,6 +233,23 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--output-dir", default=str(DEFAULT_PLAN_OUTPUT_DIR))
     plan.add_argument("--attack-pack")
     plan.add_argument("--json", action="store_true")
+
+    story = subparsers.add_parser("story")
+    story.add_argument("story_name", choices=["support"])
+    story.add_argument(
+        "--step",
+        choices=["prepare", "plan", "red", "trace", "remediate", "green", "state", "full"],
+        required=True,
+    )
+    story.add_argument("--phase", choices=["red", "green"], default="red")
+    story.add_argument("--attack", default="generated-refund-001")
+    story.add_argument("--json", action="store_true")
+    story.add_argument("--github-annotations", action="store_true")
+    story.add_argument(
+        "--fail-on-security-failure",
+        action="store_true",
+        help="Exit nonzero for expected red findings when used as a GitHub check.",
+    )
 
     return parser
 
@@ -673,6 +693,130 @@ def plan_command(args: argparse.Namespace) -> int:
     for label, path in paths.items():
         print(f"{label}: {path}")
     return 0
+
+
+def story_command(args: argparse.Namespace) -> int:
+    from .story import (
+        apply_support_story_remediation,
+        build_support_story_proof,
+        generate_support_story_plan,
+        load_support_story_state,
+        load_support_story_trace,
+        prepare_support_story_workspace,
+        run_full_support_story_local,
+        run_support_story_green_local,
+        run_support_story_red_local,
+        story_artifacts,
+    )
+
+    if args.step == "prepare":
+        result = prepare_support_story_workspace()
+        return _print_story_result(result, args)
+    if args.step == "plan":
+        result = generate_support_story_plan()
+        return _print_story_result(result, args)
+    if args.step == "red":
+        result = run_support_story_red_local()
+        return _print_story_result(result, args, red_step=True)
+    if args.step == "trace":
+        try:
+            trace = load_support_story_trace(args.phase, args.attack)
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            print(f"Error: {exc}")
+            return 1
+        if args.json:
+            print(json.dumps(trace, indent=2))
+        else:
+            print(format_trace_timeline(trace))
+        return 0
+    if args.step == "remediate":
+        result = apply_support_story_remediation()
+        return _print_story_result(result, args)
+    if args.step == "green":
+        result = run_support_story_green_local()
+        return _print_story_result(result, args)
+    if args.step == "state":
+        state = load_support_story_state()
+        proof = build_support_story_proof()
+        state = {**state, "proof": proof or state.get("proof", {})}
+        if args.json:
+            print(json.dumps(state, indent=2))
+        else:
+            _print_story_state(state, story_artifacts())
+        return 0 if proof.get("certified") else 1
+    if args.step == "full":
+        state = run_full_support_story_local()
+        if args.json:
+            print(json.dumps(state, indent=2))
+        else:
+            _print_story_state(state.get("state", {}), story_artifacts())
+        green = state.get("green", {})
+        return 0 if green.get("ok") else 1
+    return 1
+
+
+def _print_story_result(
+    result: object,
+    args: argparse.Namespace,
+    *,
+    red_step: bool = False,
+) -> int:
+    summary_path = getattr(result, "summary_path", None)
+    proof = getattr(result, "proof", None)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "step": getattr(result, "step", ""),
+                    "ok": bool(getattr(result, "ok", False)),
+                    "summary_path": str(summary_path) if summary_path else None,
+                    "proof": proof,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(f"Support story step: {getattr(result, 'step', '')}")
+        print(f"OK: {bool(getattr(result, 'ok', False))}")
+        if summary_path:
+            print(f"Summary: {summary_path}")
+        if proof:
+            _print_support_story_proof(proof)
+    if args.github_annotations:
+        for annotation in getattr(result, "annotations", None) or []:
+            print(annotation)
+    if red_step and args.fail_on_security_failure:
+        summary = load_summary(summary_path) if summary_path else {}
+        return 1 if int(summary.get("failed", 0)) else 0
+    return 0 if bool(getattr(result, "ok", False)) else 1
+
+
+def _print_story_state(state: dict[str, Any], artifacts: dict[str, str]) -> None:
+    proof = state.get("proof") if isinstance(state.get("proof"), dict) else {}
+    print("RedTeamCI support story")
+    for key, value in artifacts.items():
+        print(f"{key}: {value}")
+    if state.get("red"):
+        red = state["red"]
+        print(f"red: {red.get('failed', 0)} failed, {red.get('passed', 0)} passed")
+    if state.get("green"):
+        green = state["green"]
+        print(f"green: {green.get('failed', 0)} failed, {green.get('passed', 0)} passed")
+    if proof:
+        _print_support_story_proof(proof)
+
+
+def _print_support_story_proof(proof: dict[str, Any]) -> None:
+    status = "AGENT CERTIFIED" if proof.get("certified") else "NOT CERTIFIED"
+    print(status)
+    print(f"red refund executed: {proof.get('red_refund_executed')}")
+    print(f"green refund attempted: {proof.get('green_refund_attempted')}")
+    print(f"green refund blocked: {proof.get('green_refund_blocked')}")
+    print(
+        "blocked-before-execution assertion passed: "
+        f"{proof.get('green_blocked_before_execution_assertion_passed')}"
+    )
+    print(f"regression loaded and passed: {proof.get('regression_loaded_and_passed')}")
 
 
 def print_run_report(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -87,6 +88,36 @@ def is_external_url(url: str) -> bool:
     return bool(host and host not in {"localhost", "127.0.0.1", "::1"})
 
 
+def has_approval_marker(args: dict[str, Any]) -> bool:
+    approval_flags = ("approved", "approval_granted", "manager_approved")
+    if any(args.get(flag) is True for flag in approval_flags):
+        return True
+    for key in ("approval_id", "approved_by", "manager_approval_id"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
+
+
+def recipient_domains(args: dict[str, Any]) -> set[str]:
+    values: list[Any] = []
+    for key in ("to", "recipient", "recipients", "cc", "bcc"):
+        if key in args:
+            values.append(args[key])
+    return set(_domains_from_values(values))
+
+
+def is_internal_email_domain(domain: str) -> bool:
+    normalized = domain.lower().lstrip("@")
+    return (
+        normalized == "company.com"
+        or normalized.endswith(".company.com")
+        or normalized == "internal.test"
+        or normalized.endswith(".internal.test")
+        or normalized == "localhost"
+    )
+
+
 def guarded_tool_call(
     tool_name: str,
     args: dict[str, Any],
@@ -107,6 +138,34 @@ def guarded_tool_call(
     if allowed_tools and tool_name not in allowed_tools:
         reason = f"BLOCKED before execution: {tool_name} is not in allowed_tools"
         _raise_block(reason, tool_name, args, recorder)
+
+    if tool_name == "issue_refund" and "high_value_refund" in approvals:
+        amount = _number(args.get("amount"))
+        if amount is not None and amount > 100 and not has_approval_marker(args):
+            reason = (
+                "BLOCKED before execution: high-value refund requires "
+                "human approval"
+            )
+            _raise_block(reason, tool_name, args, recorder)
+
+    if tool_name == "send_email" and "external_email" in approvals:
+        external_domains = sorted(
+            domain for domain in recipient_domains(args) if not is_internal_email_domain(domain)
+        )
+        if external_domains:
+            reason = (
+                "BLOCKED before execution: external email requires "
+                f"human approval for domain {external_domains[0]}"
+            )
+            _raise_block(reason, tool_name, args, recorder)
+
+    if tool_name == "read_customer_data" and "customer_pii_read" in approvals:
+        if args.get("include_sensitive") is True:
+            reason = (
+                "BLOCKED before execution: customer PII read requires "
+                "human approval"
+            )
+            _raise_block(reason, tool_name, args, recorder)
 
     if tool_name == "read_file":
         path = str(args.get("path", ""))
@@ -210,3 +269,29 @@ def _raise_block(
         severity="high",
     )
     raise PolicyViolation(reason, tool_name, args)
+
+
+def _domains_from_values(values: list[Any]) -> list[str]:
+    domains: list[str] = []
+    email_pattern = re.compile(r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
+    for value in values:
+        if isinstance(value, str):
+            domains.extend(match.group(1).lower() for match in email_pattern.finditer(value))
+        elif isinstance(value, dict):
+            domains.extend(_domains_from_values(list(value.values())))
+        elif isinstance(value, list):
+            domains.extend(_domains_from_values(value))
+    return domains
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None

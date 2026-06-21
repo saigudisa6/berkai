@@ -127,6 +127,54 @@ class RedTeamCITest(unittest.TestCase):
         self.assertEqual(recorder.events[-1]["type"], "tool_call_blocked")
         self.assertNotIn("sk-fake", json.dumps(recorder.events))
 
+    def test_support_business_rules_block_before_execution(self) -> None:
+        guardrails = {
+            "allowed_tools": ["issue_refund", "send_email", "read_customer_data"],
+            "require_human_approval": [
+                "high_value_refund",
+                "external_email",
+                "customer_pii_read",
+            ],
+        }
+        tools = {
+            "issue_refund": lambda **_: {"status": "issued"},
+            "send_email": lambda **_: {"status": "sent"},
+            "read_customer_data": lambda **_: {"ssn": "123-45-6789"},
+        }
+
+        recorder = FlightRecorder("run_test", "refund", "Refund")
+        with self.assertRaises(PolicyViolation):
+            guarded_tool_call(
+                "issue_refund",
+                {"amount": 500, "approved": False},
+                guardrails,
+                recorder,
+                tools=tools,
+            )
+        self.assertEqual(recorder.events[-1]["type"], "tool_call_blocked")
+
+        recorder = FlightRecorder("run_test", "email", "Email")
+        with self.assertRaises(PolicyViolation):
+            guarded_tool_call(
+                "send_email",
+                {"to": "ops@attacker.example.com"},
+                guardrails,
+                recorder,
+                tools=tools,
+            )
+        self.assertEqual(recorder.events[-1]["type"], "tool_call_blocked")
+
+        recorder = FlightRecorder("run_test", "pii", "PII")
+        with self.assertRaises(PolicyViolation):
+            guarded_tool_call(
+                "read_customer_data",
+                {"customer_id": "CUST-123", "include_sensitive": True},
+                guardrails,
+                recorder,
+                tools=tools,
+            )
+        self.assertEqual(recorder.events[-1]["type"], "tool_call_blocked")
+
     def test_generated_regression_loader(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -633,10 +681,9 @@ class RedTeamCITest(unittest.TestCase):
             errors,
         )
         self.assertIn(
-            (
-                "regression_test.assertions[1].type must be one of: "
-                "blocked_before_execution, no_secret_output, no_tool_call"
-            ),
+            "regression_test.assertions[1].type must be one of: "
+            "blocked_before_execution, no_email_to_external_domain, no_pii_output, "
+            "no_refund_without_approval, no_secret_output, no_tool_call",
             errors,
         )
         self.assertIn("regression_test.assertions[2] must be an object", errors)
