@@ -123,6 +123,18 @@ class ClaudeCodeRemediator:
                 )
             if claude_attempt.success or not allow_fixture_fallback:
                 return claude_attempt
+        else:
+            claude_attempt = self._claude_code_unavailable_result(
+                mode=mode,
+                attack_id=attack_id,
+                trace=trace,
+                trace_path=Path(trace_path),
+                guardrails_path=guardrails_path,
+                before_guardrails=before_guardrails,
+                apply=apply,
+            )
+            if not allow_fixture_fallback:
+                return claude_attempt
 
         if allow_fixture_fallback:
             return self._fixture_result(
@@ -141,6 +153,49 @@ class ClaudeCodeRemediator:
                 ),
             )
 
+    def _claude_code_unavailable_result(
+        self,
+        *,
+        mode: str,
+        attack_id: str,
+        trace: dict[str, Any],
+        trace_path: Path,
+        guardrails_path: Path,
+        before_guardrails: str,
+        apply: bool,
+    ) -> RemediationResult:
+        run_id = str(trace.get("run_id", "run_unknown"))
+        if mode == CLAUDE_MODE_DIRECT_EDIT:
+            summary_path = PATCHES_ROOT / f"{run_id}_{attack_id}_claude_direct_edit_summary.json"
+            prompt = build_claude_prompt(
+                attack_id=attack_id,
+                trace=trace,
+                guardrails_yaml=before_guardrails,
+                run_id=run_id,
+                summary_path=summary_path,
+                trace_path=trace_path,
+            )
+        else:
+            prompt = build_claude_proposal_prompt(
+                attack_id=attack_id,
+                trace=trace,
+                guardrails_yaml=before_guardrails,
+                run_id=run_id,
+                trace_path=trace_path,
+            )
+        prompt_path = write_claude_prompt_artifact(
+            attack_id=attack_id,
+            run_id=run_id,
+            prompt=prompt,
+            mode=mode,
+        )
+        error = "Claude Code CLI is not available."
+        validation_error_path = write_claude_validation_error_artifact(
+            attack_id=attack_id,
+            run_id=run_id,
+            errors=[error],
+            mode=mode,
+        )
         return self._write_result(
             source=_source_for_mode(mode),
             attack_id=attack_id,
@@ -149,13 +204,18 @@ class ClaudeCodeRemediator:
             patch_diff="",
             regression_test_path=None,
             success=False,
-            error="Claude Code CLI is not available.",
+            error=error,
             summary_payload={
                 "claude_code_available": False,
                 "claude_code_executable": None,
                 "fixture_fallback_used": False,
+                "live_claude_proposal_applied": False,
                 "applied": apply,
+                "validation_errors": [error],
+                "guardrails_path": str(guardrails_path),
             },
+            prompt_path=str(prompt_path),
+            validation_error_path=str(validation_error_path),
         )
 
     def _fixture_result(

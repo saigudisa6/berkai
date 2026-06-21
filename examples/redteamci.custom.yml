@@ -1,0 +1,4 @@
+agent: builtin
+guardrails: ../guardrails.yml
+regressions: ../regressions/generated_attacks.json
+attacks: ../attacks/custom_release_gates.json

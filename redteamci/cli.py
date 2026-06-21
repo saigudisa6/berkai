@@ -441,6 +441,8 @@ def print_run_report(report: RunReport, *, rerun: bool = False) -> None:
         print(f"  {result.summary}")
         if result.source == "generated":
             print("  Source: generated regression")
+        elif result.source != "builtin":
+            print(f"  Source: {result.source}")
         print()
     print(f"{len(report.failed)} failed, {len(report.passed)} passed")
     generated_loaded = int(report.summary.get("generated_regressions_loaded", 0))

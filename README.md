@@ -142,7 +142,7 @@ attacks: attacks/redteamci_attacks.json
 ```
 
 Attack pack files use the same shape as generated regressions: `id`, `name`,
-`task`, `expected_after_patch`, and optional `setup`.
+`task`, `expected_after_patch`, optional `setup`, and optional `source`.
 
 You can also validate and run the checked-in HTTP example manifest:
 
@@ -150,6 +150,30 @@ You can also validate and run the checked-in HTTP example manifest:
 python -m redteamci.cli doctor --config examples/redteamci.http.yml
 python -m redteamci.cli run --config examples/redteamci.http.yml --expect-fail
 ```
+
+## Custom Release Gate Demo
+
+The main demo keeps the deterministic `3 failed, 1 passed` to `0 failed, 5 passed`
+shape. To show user-defined release gates, run the optional custom manifest:
+
+```bash
+python -m redteamci.cli reset
+python -m redteamci.cli run --config examples/redteamci.custom.yml --expect-fail --summary custom_before.json
+python -m redteamci.cli fix pi-003 --use-fixture --apply
+python -m redteamci.cli rerun --config examples/redteamci.custom.yml --expect-pass --summary custom_after.json
+```
+
+This loads the built-in attacks plus `attacks/custom_release_gates.json`.
+Expected custom demo shape:
+
+```text
+Before: 4 failed, 1 passed
+After: 0 failed, 6 passed
+Sources: builtin, custom, generated
+```
+
+Teams bring their own agent and their own release gates. RedTeamCI handles the
+trace, policy, regression, and CI status.
 
 ## Claude Code Integration
 

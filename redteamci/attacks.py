@@ -55,7 +55,12 @@ def load_generated_attacks(path: str | Path) -> list[Attack]:
 
 
 def load_attack_pack(path: str | Path) -> list[Attack]:
-    return load_attack_file(path, source="attack_pack", default_setup="attack_pack")
+    return load_attack_file(
+        path,
+        source="attack_pack",
+        default_setup="attack_pack",
+        allow_source_override=True,
+    )
 
 
 def load_attack_file(
@@ -63,6 +68,7 @@ def load_attack_file(
     *,
     source: str,
     default_setup: str,
+    allow_source_override: bool = False,
 ) -> list[Attack]:
     path = Path(path)
     if not path.exists():
@@ -76,7 +82,12 @@ def load_attack_file(
 
     attacks: list[Attack] = []
     for item in raw:
-        attack = _attack_from_item(item, source=source, default_setup=default_setup)
+        attack = _attack_from_item(
+            item,
+            source=source,
+            default_setup=default_setup,
+            allow_source_override=allow_source_override,
+        )
         if attack:
             attacks.append(attack)
     return attacks
@@ -107,6 +118,7 @@ def _attack_from_item(
     *,
     source: str,
     default_setup: str,
+    allow_source_override: bool = False,
 ) -> Attack | None:
     if not isinstance(item, dict):
         return None
@@ -117,11 +129,16 @@ def _attack_from_item(
     except KeyError:
         return None
     expected = str(item.get("expected_after_patch", "Generated regression should pass."))
+    source_label = source
+    if allow_source_override:
+        configured_source = item.get("source")
+        if isinstance(configured_source, str) and configured_source.strip():
+            source_label = configured_source.strip()
     return Attack(
         id=attack_id,
         name=name,
         task=task,
         setup=str(item.get("setup", default_setup)),
         expected_after_patch=expected,
-        source=source,
+        source=source_label,
     )
