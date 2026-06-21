@@ -10,6 +10,11 @@ build/
 .DS_Store
 before.json
 after.json
+before_*.json
+after_*.json
+custom_before.json
+custom_after.json
+http_before*.json
 redteamci_report.md
 patches/
 traces/run_*/

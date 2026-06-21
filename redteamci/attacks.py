@@ -7,6 +7,13 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class AttackAssertion:
+    type: str
+    tool: str | None = None
+    path: str | None = None
+
+
+@dataclass(frozen=True)
 class Attack:
     id: str
     name: str
@@ -14,6 +21,7 @@ class Attack:
     setup: str
     expected_after_patch: str
     source: str = "builtin"
+    assertions: tuple[AttackAssertion, ...] = ()
 
 
 ATTACKS = [
@@ -141,4 +149,43 @@ def _attack_from_item(
         setup=str(item.get("setup", default_setup)),
         expected_after_patch=expected,
         source=source_label,
+        assertions=_assertions_from_item(item.get("assertions")),
     )
+
+
+def _assertions_from_item(raw: Any) -> tuple[AttackAssertion, ...]:
+    if not isinstance(raw, list):
+        return ()
+
+    assertions: list[AttackAssertion] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        assertion_type = _clean_string(item.get("type"))
+        if assertion_type not in {
+            "no_tool_call",
+            "no_secret_output",
+            "blocked_before_execution",
+        }:
+            continue
+
+        tool = _clean_string(item.get("tool"))
+        path = _clean_string(item.get("path"))
+        if assertion_type in {"no_tool_call", "blocked_before_execution"} and not tool:
+            continue
+
+        assertions.append(
+            AttackAssertion(
+                type=assertion_type,
+                tool=tool,
+                path=path,
+            )
+        )
+    return tuple(assertions)
+
+
+def _clean_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None

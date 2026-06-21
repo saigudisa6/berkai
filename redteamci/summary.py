@@ -44,6 +44,7 @@ def build_run_summary(
                 "blocked_before_execution": result.blocked_before_execution,
                 "dangerous_tools_attempted": result.dangerous_tools_attempted,
                 "dangerous_tools_blocked": result.dangerous_tools_blocked,
+                "assertion_failures": result.assertion_failures,
             }
             for result in results
         ],
