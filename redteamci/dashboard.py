@@ -22,6 +22,17 @@ from redteamci.paths import (
     PATCHES_ROOT,
     ROOT,
 )
+from redteamci.github_actions import (
+    GitHubActionsError,
+    configured_branch,
+    configured_workflow_file,
+    github_available,
+    list_artifacts,
+    poll_workflow_run,
+    trigger_support_story_workflow,
+    wait_for_workflow_run,
+    workflow_run_url,
+)
 from redteamci.summary import load_summary
 
 
@@ -122,13 +133,23 @@ def _render_support_story_mode() -> None:
         st.info("Run the support story to create replayable red/green evidence.")
 
     first_row = st.columns(4)
-    if first_row[0].button("Run Full Story", use_container_width=True):
+    if first_row[0].button("Run Full Local Story", use_container_width=True):
         run_cli(["story", "support", "--step", "full"])
-    if first_row[1].button("Profile Agent", use_container_width=True):
+    if first_row[1].button("Load Latest Demo State", use_container_width=True):
+        st.rerun()
+    if first_row[2].button("Profile Agent", use_container_width=True):
         run_cli(["story", "support", "--step", "prepare"])
-    if first_row[2].button("Generate Tests", use_container_width=True):
+    if first_row[3].button("Generate Attack Plan", use_container_width=True):
         run_cli(["story", "support", "--step", "plan"])
-    if first_row[3].button("Replay Refund Trace", use_container_width=True):
+
+    _render_support_story_github_panel()
+
+    second_row = st.columns(4)
+    if second_row[0].button("Run Local Red Rehearsal", use_container_width=True):
+        run_cli(["story", "support", "--step", "red"])
+    if second_row[1].button("Replay Refund Trace", use_container_width=True):
+        if not load_story_trace(ROOT, "red", "generated-refund-001"):
+            run_cli(["story", "support", "--step", "red"])
         run_cli(
             [
                 "story",
@@ -136,18 +157,14 @@ def _render_support_story_mode() -> None:
                 "--step",
                 "trace",
                 "--phase",
-                "green",
+                "red",
                 "--attack",
                 "generated-refund-001",
             ]
         )
-
-    second_row = st.columns(3)
-    if second_row[0].button("Run Red", use_container_width=True):
-        run_cli(["story", "support", "--step", "red"])
-    if second_row[1].button("Apply Remediation", use_container_width=True):
+    if second_row[2].button("Apply Claude-Compatible Remediation", use_container_width=True):
         run_cli(["story", "support", "--step", "remediate"])
-    if second_row[2].button("Run Green", use_container_width=True):
+    if second_row[3].button("Run Local Green Rehearsal", use_container_width=True):
         run_cli(["story", "support", "--step", "green"])
 
     left, middle, right = st.columns([1.1, 1.4, 1.5])
@@ -163,11 +180,9 @@ def _render_support_story_mode() -> None:
 
     with middle:
         st.subheader("Generated Tests")
-        attack_pack = state["attack_pack"]
-        if attack_pack:
-            st.json(attack_pack)
-        else:
-            st.info("Generate tests to populate the support attack pack.")
+        _render_support_attack_cards(state["attack_pack"])
+        st.subheader("Remediation")
+        _render_support_story_patch(ROOT)
 
     with right:
         st.subheader("Flight Recorder")
@@ -184,9 +199,117 @@ def _render_support_story_mode() -> None:
                     st.json(event)
 
     st.caption(
-        "GitHub demo mode: workflow_dispatch scenario=support-story mode=red "
-        "should fail the check; mode=green should pass after remediation."
+        "GitHub status is live CI. Trace replay uses local story artifacts for "
+        "demo reliability; artifact download is optional."
     )
+
+
+def _render_support_story_github_panel() -> None:
+    st.subheader("Real GitHub CI")
+    available, message = github_available()
+    if available:
+        st.caption(message)
+    else:
+        st.warning(message)
+        st.caption(
+            "Set GITHUB_TOKEN with Actions: write and Contents: read, plus "
+            "GITHUB_REPOSITORY=saigudisa6/berkai and optional GITHUB_BRANCH=main."
+        )
+
+    cols = st.columns(2)
+    if cols[0].button("Run GitHub CI Red", disabled=not available, use_container_width=True):
+        _run_github_story_mode("red")
+    if cols[1].button("Run GitHub CI Green", disabled=not available, use_container_width=True):
+        _run_github_story_mode("green")
+
+    red_state = st.session_state.get("support_story_github_red")
+    green_state = st.session_state.get("support_story_github_green")
+    _render_github_run_status("red", red_state)
+    _render_github_run_status("green", green_state)
+
+
+def _run_github_story_mode(mode: str) -> None:
+    state_key = f"support_story_github_{mode}"
+    try:
+        with st.spinner(f"Dispatching support-story {mode} workflow..."):
+            correlation_id = trigger_support_story_workflow(mode)
+            run = wait_for_workflow_run(
+                configured_workflow_file(),
+                configured_branch(),
+                correlation_id,
+                timeout_seconds=60,
+                interval_seconds=5,
+            )
+            if run is None:
+                st.session_state[state_key] = {
+                    "correlation_id": correlation_id,
+                    "status": "queued",
+                    "conclusion": None,
+                    "url": "",
+                    "artifacts": [],
+                }
+                st.warning(f"Workflow dispatched with correlation id {correlation_id}.")
+                return
+            completed = poll_workflow_run(run.id, timeout_seconds=180, interval_seconds=5)
+            artifacts = list_artifacts(completed.id)
+            st.session_state[state_key] = {
+                "correlation_id": correlation_id,
+                "status": completed.status,
+                "conclusion": completed.conclusion,
+                "url": workflow_run_url(completed),
+                "artifacts": [artifact.get("name", "") for artifact in artifacts],
+            }
+    except GitHubActionsError as exc:
+        st.session_state[state_key] = {"error": str(exc)}
+        st.error(str(exc))
+
+
+def _render_github_run_status(label: str, state: dict[str, Any] | None) -> None:
+    if not state:
+        return
+    if state.get("error"):
+        st.error(f"GitHub {label}: {state['error']}")
+        return
+    conclusion = state.get("conclusion") or state.get("status") or "unknown"
+    correlation_id = state.get("correlation_id", "-")
+    url = state.get("url", "")
+    st.write(f"GitHub {label}: {conclusion} ({correlation_id})")
+    if url:
+        st.link_button(f"Open GitHub {label} run", url)
+    artifacts = [artifact for artifact in state.get("artifacts", []) if artifact]
+    if artifacts:
+        st.caption("Artifacts: " + ", ".join(artifacts))
+
+
+def _render_support_attack_cards(attack_pack: list[dict[str, Any]]) -> None:
+    if not attack_pack:
+        st.info("Generate tests to populate the support attack pack.")
+        return
+    for attack in attack_pack:
+        attack_id = str(attack.get("id", ""))
+        name = str(attack.get("name", attack_id))
+        task = str(attack.get("task", ""))
+        with st.expander(f"{attack_id} - {name}", expanded=attack_id == "generated-refund-001"):
+            st.caption(task)
+            st.json(attack.get("assertions", []))
+
+
+def _render_support_story_patch(root: Path) -> None:
+    story_root = root / SUPPORT_STORY_RELATIVE_ROOT
+    summary = _load_json_object(story_root / "patches" / "support_story_summary.json")
+    diff = _load_text(story_root / "patches" / "support_story.diff")
+    regression = _load_json(story_root / "regressions" / "generated_attacks.json")
+    if not summary and not diff and not regression:
+        st.info("Apply remediation to see the Claude-compatible patch.")
+        return
+    if summary:
+        st.caption(f"Source: {summary.get('source', 'fixture')}")
+        st.caption(f"Regression: {summary.get('regression_test', {}).get('id', '-')}")
+    if diff:
+        st.code(diff, language="diff")
+    if regression:
+        with st.expander("Generated regression"):
+            st.json(regression)
 
 
 def _render_actions() -> None:

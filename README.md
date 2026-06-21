@@ -174,10 +174,41 @@ python -m redteamci.cli story support --step red --github-annotations --fail-on-
 The checked-in workflow also supports manual dispatch:
 
 - `scenario=support-story`, `mode=red`: writes red artifacts and fails the job.
-- `scenario=support-story`, `mode=green`: runs the full red/remediate/green proof and passes.
+- `scenario=support-story`, `mode=green`: remediates, runs green proof, and passes.
 
 Support-story artifacts are written under `.demo/support-story/` and ignored by
 git.
+
+Live GitHub dashboard setup:
+
+```bash
+export GITHUB_TOKEN=...
+export GITHUB_REPOSITORY=saigudisa6/berkai
+export GITHUB_BRANCH=main
+export REDTEAMCI_WORKFLOW_FILE=redteamci.yml
+
+python -m redteamci.cli dashboard
+```
+
+`GITHUB_TOKEN` needs Actions: write and Contents: read permissions. The
+dashboard dispatches `workflow_dispatch` runs with a correlation id, polls the
+matching real GitHub Actions run, and shows the run URL. Trace replay stays
+local for demo reliability, so GitHub artifact download is optional.
+
+Local rehearsal path:
+
+```bash
+python -m redteamci.cli story support --step prepare
+python -m redteamci.cli story support --step plan
+python -m redteamci.cli story support --step red
+python -m redteamci.cli story support --step trace --attack generated-refund-001 --phase red
+python -m redteamci.cli story support --step remediate
+python -m redteamci.cli story support --step green
+python -m redteamci.cli dashboard
+```
+
+Use `./demo_story.sh` to install dashboard dependencies and launch the app, or
+`./demo_support_story.sh` to generate local proof artifacts before launching.
 
 ## Commands
 

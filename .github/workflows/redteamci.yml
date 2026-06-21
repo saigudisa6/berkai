@@ -1,7 +1,7 @@
 name: RedTeamCI Agent Security
 run-name: >-
-  RedTeamCI ${{ github.event_name == 'workflow_dispatch' && inputs.scenario || 'ci' }}
-  ${{ inputs.mode || '' }} ${{ inputs.correlation_id || '' }}
+  RedTeamCI ${{ inputs.scenario || 'default' }} ${{ inputs.mode || 'ci' }}
+  ${{ inputs.correlation_id || github.run_number }}
 
 on:
   push:
@@ -10,21 +10,20 @@ on:
     inputs:
       scenario:
         description: Demo scenario to run
-        required: false
-        default: full
+        required: true
+        default: support-story
         type: choice
         options:
-          - full
           - support-story
+          - legacy-red-to-green
       mode:
         description: Support-story mode
-        required: false
-        default: green
+        required: true
+        default: red
         type: choice
         options:
           - red
           - green
-          - full
       correlation_id:
         description: Optional demo correlation id
         required: false
@@ -94,7 +93,7 @@ jobs:
           ${{
             github.event_name == 'workflow_dispatch' &&
             inputs.scenario == 'support-story' &&
-            (inputs.mode == 'green' || inputs.mode == 'full')
+            inputs.mode == 'green'
           }}
         run: |
           python -m redteamci.cli story support --step full
@@ -104,7 +103,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: redteamci-security-artifacts
+          name: >-
+            ${{
+              github.event_name == 'workflow_dispatch' &&
+              inputs.scenario == 'support-story' &&
+              format('redteamci-support-story-{0}', inputs.mode) ||
+              'redteamci-security-artifacts'
+            }}
           path: |
             .redteamci/
             redteamci_report.md
