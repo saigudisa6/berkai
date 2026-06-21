@@ -114,12 +114,9 @@ def main() -> None:
     streamlit = _require_streamlit()
     streamlit.set_page_config(page_title="RedTeamCI", layout="wide")
 
-    presenter_tab, developer_tab, artifacts_tab = st.tabs(
-        ["Presenter Mode", "Developer Mode", "Artifacts"]
-    )
-    with presenter_tab:
-        _render_presenter_mode()
-    with developer_tab:
+    _render_presenter_mode()
+
+    with st.expander("Developer inspection", expanded=False):
         st.subheader("Support Story Deep Inspection")
         _render_support_story_mode()
         st.divider()
@@ -134,7 +131,7 @@ def main() -> None:
         selected_attack = _render_attack_suite(left, before, after)
         _render_flight_recorder(middle, selected_attack, before, after)
         _render_patch_panel(right)
-    with artifacts_tab:
+    with st.expander("All artifacts", expanded=False):
         _render_artifacts_tab(ROOT)
 
 
@@ -153,7 +150,7 @@ def _inject_presenter_styles() -> None:
           color: #111827;
         }
         .block-container {
-          padding-top: 1.6rem;
+          padding-top: 1.05rem;
           padding-bottom: 2.2rem;
           max-width: 1280px;
         }
@@ -217,6 +214,78 @@ def _inject_presenter_styles() -> None:
         div[data-testid="column"] {
           min-width: 0;
         }
+        .rt-cockpit-shell {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .rt-topbar {
+          display: grid;
+          grid-template-columns: minmax(240px, 1.35fr) repeat(4, minmax(128px, 0.75fr));
+          gap: 10px;
+          align-items: stretch;
+          margin-bottom: 12px;
+        }
+        .rt-brand-card,
+        .rt-top-status,
+        .rt-section-band {
+          background: #ffffff;
+          border: 1px solid #d8e0ea;
+          border-radius: 8px;
+          box-shadow: 0 8px 18px rgba(15, 23, 42, 0.045);
+          box-sizing: border-box;
+        }
+        .rt-brand-card {
+          padding: 14px 16px;
+          border-left: 5px solid #2563eb;
+        }
+        .rt-brand-name {
+          color: #0f172a;
+          font-size: 1.32rem;
+          line-height: 1.1;
+          font-weight: 850;
+          margin: 0;
+        }
+        .rt-brand-subtitle {
+          color: #475569;
+          font-size: 0.86rem;
+          font-weight: 650;
+          margin-top: 5px;
+        }
+        .rt-top-status {
+          padding: 12px 13px;
+          min-height: 74px;
+        }
+        .rt-top-status-good { border-top: 4px solid #0f766e; }
+        .rt-top-status-bad { border-top: 4px solid #b42318; }
+        .rt-top-status-warn { border-top: 4px solid #b45309; }
+        .rt-top-status-muted { border-top: 4px solid #64748b; }
+        .rt-status-kicker {
+          color: #64748b;
+          font-size: 0.72rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0;
+        }
+        .rt-status-main {
+          color: #0f172a;
+          font-size: 0.94rem;
+          font-weight: 820;
+          margin-top: 6px;
+          line-height: 1.25;
+          overflow-wrap: anywhere;
+        }
+        .rt-section-band {
+          padding: 14px;
+          margin-bottom: 12px;
+        }
+        .rt-section-title {
+          color: #0f172a;
+          font-size: 0.9rem;
+          font-weight: 850;
+          text-transform: uppercase;
+          margin-bottom: 8px;
+        }
         div[data-testid="stMetric"],
         div[data-testid="stMetric"] * {
           max-width: 100%;
@@ -236,43 +305,6 @@ def _inject_presenter_styles() -> None:
         div[data-testid="stVerticalBlockBorderWrapper"] p,
         div[data-testid="stVerticalBlockBorderWrapper"] span {
           overflow-wrap: anywhere;
-        }
-        .rt-hero {
-          background: #fbfdff;
-          border: 1px solid #d8e0ea;
-          border-left: 5px solid #2f6fed;
-          border-radius: 8px;
-          padding: 22px 26px;
-          box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
-          margin-bottom: 12px;
-        }
-        .rt-eyebrow {
-          color: #1d4ed8;
-          font-size: 0.78rem;
-          font-weight: 800;
-          letter-spacing: 0;
-          text-transform: uppercase;
-          margin-bottom: 6px;
-        }
-        .rt-title {
-          font-size: 3rem;
-          line-height: 1;
-          font-weight: 800;
-          letter-spacing: 0;
-          margin: 0;
-          color: #111827;
-        }
-        .rt-headline {
-          font-size: 1.1rem;
-          color: #334155;
-          margin-top: 8px;
-          max-width: 940px;
-        }
-        .rt-script {
-          margin-top: 14px;
-          color: #475569;
-          line-height: 1.5;
-          max-width: 980px;
         }
         .rt-status-grid,
         .rt-stepper,
@@ -342,8 +374,8 @@ def _inject_presenter_styles() -> None:
           color: #334155;
         }
         .rt-stepper {
-          grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
-          margin: 14px 0 16px;
+          grid-template-columns: repeat(7, minmax(96px, 1fr));
+          margin: 0;
         }
         .rt-step {
           background: #ffffff;
@@ -354,6 +386,31 @@ def _inject_presenter_styles() -> None:
           text-align: center;
           font-size: 0.82rem;
           font-weight: 750;
+          min-height: 50px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          line-height: 1.2;
+        }
+        .rt-step-done {
+          border-color: #9bd5c9;
+          color: #075e55;
+          background: #edfdf8;
+        }
+        .rt-step-current {
+          border-color: #f0c36d;
+          color: #7c3f08;
+          background: #fff8e8;
+        }
+        .rt-step-pending {
+          border-color: #d8e0ea;
+          color: #64748b;
+          background: #f8fafc;
+        }
+        .rt-action-note {
+          color: #64748b;
+          font-size: 0.82rem;
+          margin-top: 6px;
         }
         .rt-panel {
           padding: 18px;
@@ -467,6 +524,44 @@ def _inject_presenter_styles() -> None:
         .rt-proof-grid {
           grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         }
+        .rt-proof-strip {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          gap: 9px;
+          margin-bottom: 12px;
+        }
+        .rt-proof-card {
+          background: #ffffff;
+          border: 1px solid #dce3ed;
+          border-radius: 8px;
+          padding: 10px 11px;
+          min-height: 72px;
+          box-sizing: border-box;
+        }
+        .rt-proof-card-ok {
+          border-top: 4px solid #0f766e;
+          background: #fbfffd;
+        }
+        .rt-proof-card-fail {
+          border-top: 4px solid #b42318;
+          background: #fffafa;
+        }
+        .rt-proof-card-wait {
+          border-top: 4px solid #64748b;
+          background: #f8fafc;
+        }
+        .rt-proof-name {
+          color: #334155;
+          font-size: 0.78rem;
+          font-weight: 800;
+          line-height: 1.25;
+        }
+        .rt-proof-state {
+          margin-top: 7px;
+          color: #0f172a;
+          font-size: 0.9rem;
+          font-weight: 850;
+        }
         .rt-proof-tile {
           padding: 11px 12px;
         }
@@ -478,15 +573,64 @@ def _inject_presenter_styles() -> None:
         .rt-muted {
           color: #64748b;
         }
+        .rt-timeline-event {
+          border-left: 3px solid #94a3b8;
+          padding: 9px 10px;
+          margin: 8px 0;
+          background: #f8fafc;
+          border-radius: 0 6px 6px 0;
+        }
+        .rt-timeline-event strong {
+          display: block;
+          color: #0f172a;
+          font-size: 0.84rem;
+          margin-bottom: 3px;
+        }
+        .rt-timeline-event span {
+          display: block;
+          color: #475569;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          font-size: 0.78rem;
+          overflow-wrap: anywhere;
+        }
+        .rt-timeline-good {
+          border-left-color: #0f766e;
+          background: #edfdf8;
+        }
+        .rt-timeline-bad {
+          border-left-color: #b42318;
+          background: #fff1f2;
+        }
+        .rt-timeline-muted {
+          border-left-color: #94a3b8;
+        }
+        .rt-artifact-list {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+          gap: 8px;
+          margin: 8px 0 12px;
+        }
+        .rt-artifact-chip {
+          border: 1px solid #d8e0ea;
+          border-radius: 8px;
+          background: #ffffff;
+          padding: 8px 10px;
+          color: #334155;
+          font-size: 0.82rem;
+          font-weight: 720;
+          overflow-wrap: anywhere;
+        }
         @media (max-width: 920px) {
           .block-container {
             padding-left: 1rem;
             padding-right: 1rem;
           }
-          .rt-title {
-            font-size: 2.35rem;
+          .rt-topbar {
+            grid-template-columns: 1fr;
           }
-          .rt-hero,
+          .rt-stepper {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
           .rt-panel {
             padding: 16px;
           }
@@ -524,98 +668,268 @@ def _render_demo_mode_actions() -> None:
 
 def _render_presenter_mode() -> None:
     _inject_presenter_styles()
-    _render_classic_presenter_mode()
+    state = load_support_story_dashboard_state(ROOT)
+    readiness = demo_readiness_status(state)
 
+    st.markdown('<div class="rt-cockpit-shell">', unsafe_allow_html=True)
+    _render_cockpit_status_bar(state, readiness)
+    _render_presenter_stepper(state, readiness)
+    _render_cockpit_action_row()
+    _render_cockpit_proof_cards(state, readiness)
 
-def _render_presenter_header(
-    state: dict[str, Any],
-    readiness: dict[str, Any],
-) -> None:
-    github_connected = github_available()[0]
-    sentry_context = build_sentry_dashboard_context(state)
+    profile_col, attacks_col, red_col = st.columns([1.05, 1.35, 1.15])
+    with profile_col:
+        _render_agent_profile_panel()
+    with attacks_col:
+        _render_generated_attacks_panel(state)
+    with red_col:
+        _render_red_gate_panel(state)
+
+    _render_trace_replay_panel(state)
+
+    sentry_col, claude_col = st.columns([1.05, 1.55])
+    with sentry_col:
+        _render_sentry_incident_panel(state)
+    with claude_col:
+        _render_claude_remediation_panel(ROOT, state)
+
+    _render_presenter_green_proof_panel(state, readiness)
+    _render_cockpit_artifact_drawer(state)
+    st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown(
         """
-        <div class="rt-hero">
-          <div class="rt-eyebrow">Claude Code for AI-agent security gates</div>
-          <h1 class="rt-title">RedTeamCI</h1>
-          <div class="rt-headline">pytest for AI-agent security</div>
-          <div class="rt-script">
-            Companies are shipping agents that can issue refunds, send email,
-            and touch customer data. Normal CI tests code. RedTeamCI tests
-            whether the agent uses its tools safely.
+        <div class="rt-section-band">
+          <div class="rt-section-title">Optional any-agent intake lab</div>
+          <div class="rt-muted">
+            Upload a manifest or use the sample agent to show the same generated-check
+            workflow on a different agent surface.
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    uploaded_state = _render_uploaded_agent_intake()
+    if uploaded_state.get("available"):
+        _render_uploaded_agent_actions(uploaded_state)
+        upload_cols = st.columns([1.1, 1.3, 1.2])
+        with upload_cols[0]:
+            _render_uploaded_agent_profile_panel(uploaded_state)
+        with upload_cols[1]:
+            _render_uploaded_agent_generated_attacks_panel(uploaded_state)
+        with upload_cols[2]:
+            _render_uploaded_agent_red_gate_panel(uploaded_state)
+        _render_uploaded_agent_trace_replay_panel(uploaded_state)
 
+
+def _render_cockpit_status_bar(
+    state: dict[str, Any],
+    readiness: dict[str, Any],
+) -> None:
+    github_connected = github_available()[0]
+    sentry_context = build_sentry_dashboard_context(state)
+    claude_available = bool(state.get("claude_code_available"))
     status_cards = [
-        ("Scenario", "Customer Support Agent", "muted"),
-        ("Proof", readiness["label"], _readiness_tone(readiness)),
-        ("Release gate", "Local proof active", "good"),
-        ("GitHub CI", "connected" if github_connected else "not connected", "muted"),
         (
-            "Sentry",
-            "optional, configured" if sentry_context["configured"] else "optional, not configured",
+            "GitHub status",
+            "connected" if github_connected else "not connected",
+            "good" if github_connected else "muted",
+        ),
+        (
+            "Sentry status",
+            "configured" if sentry_context["configured"] else "missing",
             "good" if sentry_context["configured"] else "muted",
+        ),
+        (
+            "Claude Code",
+            "available" if claude_available else "unavailable",
+            "good" if claude_available else "warn",
+        ),
+        (
+            "Certification",
+            str(readiness["label"]),
+            _readiness_tone(readiness),
         ),
     ]
     st.markdown(
-        '<div class="rt-status-grid">'
-        + "".join(_status_card_html(label, value, tone) for label, value, tone in status_cards)
+        f"""
+        <div class="rt-topbar">
+          <div class="rt-brand-card">
+            <div class="rt-status-kicker">AI/CD Security Cockpit</div>
+            <h1 class="rt-brand-name">RedTeamCI</h1>
+            <div class="rt-brand-subtitle">Claude Code for AI Agent Security</div>
+          </div>
+          {''.join(_top_status_html(label, value, tone) for label, value, tone in status_cards)}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_cockpit_action_row() -> None:
+    st.markdown(
+        """
+        <div class="rt-section-band">
+          <div class="rt-section-title">Pipeline actions</div>
+          <div class="rt-muted">
+            Native Streamlit controls below execute the real RedTeamCI story commands.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(7)
+    if cols[0].button("Prepare Story", key="cockpit_prepare", use_container_width=True):
+        with st.expander("Prepare Story output", expanded=True):
+            run_cli(["story", "support", "--step", "prepare"])
+            run_cli(["story", "support", "--step", "plan"])
+            st.success("Prepared workspace and generated attacks. Click Refresh State.")
+    if cols[1].button("Run Red Gate", key="cockpit_red", use_container_width=True):
+        with st.expander("Run Red Gate output", expanded=True):
+            run_cli(["story", "support", "--step", "red"])
+            st.info("A failing red gate is expected when the unsafe refund executes.")
+    if cols[2].button(
+        "Replay Refund Trace",
+        key="cockpit_replay_refund",
+        use_container_width=True,
+    ):
+        with st.expander("Replay Refund Trace output", expanded=True):
+            if not load_story_trace(ROOT, "red", "generated-refund-001"):
+                run_cli(["story", "support", "--step", "red"])
+            run_cli(
+                [
+                    "story",
+                    "support",
+                    "--step",
+                    "trace",
+                    "--phase",
+                    "red",
+                    "--attack",
+                    "generated-refund-001",
+                ]
+            )
+    if cols[3].button(
+        "Run Claude Code Remediation",
+        key="cockpit_claude_remediate",
+        use_container_width=True,
+    ):
+        with st.expander("Run Claude Code Remediation output", expanded=True):
+            run_cli(["story", "support", "--step", "claude-code-remediate"])
+            st.info("Claude output is validated before the remediation is accepted.")
+    if cols[4].button(
+        "Use Deterministic Fallback",
+        key="cockpit_fixture_remediate",
+        use_container_width=True,
+    ):
+        with st.expander("Use Deterministic Fallback output", expanded=True):
+            run_cli(["story", "support", "--step", "remediate"])
+            st.info("Fallback artifacts are explicit in the remediation summary.")
+    if cols[5].button("Run Green Gate", key="cockpit_green", use_container_width=True):
+        with st.expander("Run Green Gate output", expanded=True):
+            run_cli(["story", "support", "--step", "green"])
+            st.info("Green passes only when the refund is blocked before execution.")
+    if cols[6].button("Refresh State", key="cockpit_refresh", use_container_width=True):
+        st.rerun()
+    st.markdown(
+        '<div class="rt-action-note">Use Refresh State after commands to reload proof panels.</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_cockpit_proof_cards(
+    state: dict[str, Any],
+    readiness: dict[str, Any],
+) -> None:
+    proof = state.get("proof", {})
+    red_summary = state.get("red_summary") or {}
+    green_summary = state.get("green_summary") or {}
+    remediation = state.get("remediation", {})
+    if not isinstance(remediation, dict):
+        remediation = {}
+    green_gate_passed = bool(
+        green_summary
+        and int(green_summary.get("failed", 1) or 0) == 0
+        and int(green_summary.get("passed", 0) or 0) > 0
+    )
+    cards = [
+        ("Red gate failed", bool(red_summary and int(red_summary.get("failed", 0) or 0) > 0)),
+        ("Unauthorized refund executed", bool(proof.get("red_refund_executed"))),
+        ("Sentry incident recorded", _cockpit_sentry_recorded(state)),
+        ("Claude Code remediation applied", _cockpit_remediation_applied(state)),
+        ("Regression generated", bool(state.get("generated_regression_exists"))),
+        ("Green gate passed", green_gate_passed),
+        ("Refund blocked before execution", bool(proof.get("green_refund_blocked"))),
+        ("Agent certified", bool(readiness.get("ready"))),
+    ]
+    st.markdown(
+        '<div class="rt-proof-strip">'
+        + "".join(_cockpit_proof_card_html(label, ok) for label, ok in cards)
         + "</div>",
         unsafe_allow_html=True,
     )
 
-    if readiness["status"] == "ready":
-        _render_presenter_alert(
-            "good",
-            "DEMO READY: red exploit, remediation artifact, generated regression, and green proof are complete.",
-        )
-    elif readiness["status"] == "partial":
-        _render_presenter_alert(
-            "warn",
-            "INCOMPLETE: proof artifacts exist, but the full certification chain is not complete yet.",
-        )
-    else:
-        _render_presenter_alert(
-            "muted",
-            "NO RUN YET: generate demo proof to create the local certification chain.",
-        )
 
-
-def _render_presenter_actions() -> None:
-    cols = st.columns(5)
-    if cols[0].button("Load Latest Proof", key="presenter_load", use_container_width=True):
-        st.rerun()
-    if cols[1].button(
-        "Generate Demo Proof",
-        key="presenter_generate_demo_proof",
-        use_container_width=True,
-    ):
-        with st.spinner("Generating deterministic demo proof..."):
-            run_deterministic_demo_proof()
-        st.rerun()
-    if cols[2].button("Run Red Gate", key="presenter_run_red", use_container_width=True):
-        run_cli(["story", "support", "--step", "red"])
-        st.rerun()
-
-    strict_live = st.checkbox("Strict live Claude", key="presenter_strict_live")
-    if cols[3].button(
-        "Run Live Claude",
-        key="presenter_run_live_claude",
-        use_container_width=True,
-    ):
-        args = ["story", "support", "--step", "claude-code-remediate"]
-        if strict_live:
-            args.append("--strict-claude-code")
-        else:
-            args.append("--fixture-fallback")
-        run_cli(args)
-        st.rerun()
-    if cols[4].button("Run Green Proof", key="presenter_run_green", use_container_width=True):
-        run_cli(["story", "support", "--step", "green"])
-        st.rerun()
+def _render_cockpit_artifact_drawer(state: dict[str, Any]) -> None:
+    story_root = ROOT / SUPPORT_STORY_RELATIVE_ROOT
+    remediation = state.get("remediation", {})
+    if not isinstance(remediation, dict):
+        remediation = {}
+    artifacts = [
+        ("red summary", story_root / "red" / "summary.json"),
+        ("green summary", story_root / "green" / "summary.json"),
+        (
+            "red trace",
+            _latest_story_trace_path(ROOT, "red", "generated-refund-001"),
+        ),
+        (
+            "green trace",
+            _latest_story_trace_path(ROOT, "green", "generated-refund-001"),
+        ),
+        (
+            "Claude prompt",
+            _root_path(ROOT, remediation.get("prompt_path"))
+            or story_root / "patches" / "support_story_claude_proposal_prompt.txt",
+        ),
+        (
+            "Claude raw output",
+            _root_path(ROOT, remediation.get("raw_output_path"))
+            or story_root / "patches" / "support_story_claude_proposal_raw.json",
+        ),
+        (
+            "Claude proposal",
+            _root_path(ROOT, remediation.get("proposal_path"))
+            or story_root / "patches" / "support_story_claude_proposal.json",
+        ),
+        (
+            "diff",
+            _root_path(ROOT, remediation.get("diff_path"))
+            or story_root / "patches" / "support_story.diff",
+        ),
+        (
+            "regression file",
+            _root_path(ROOT, remediation.get("regression_test_path"))
+            or story_root / "regressions" / "generated_attacks.json",
+        ),
+    ]
+    st.markdown(
+        """
+        <div class="rt-section-band">
+          <div class="rt-section-title">Artifact drawer</div>
+          <div class="rt-muted">
+            Replayable evidence created by the current red/Claude/green pipeline.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="rt-artifact-list">'
+        + "".join(_artifact_chip_html(label, path) for label, path in artifacts)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    for label, path in artifacts:
+        _render_file_artifact(label, path)
 
 
 def deterministic_demo_proof_commands() -> list[list[str]]:
@@ -655,20 +969,36 @@ def _render_presenter_command_output(
         st.success("Run complete. Click Load Latest Proof to refresh the proof panels.")
 
 
-def _render_presenter_stepper() -> None:
-    labels = [
-        "Agent Profile",
-        "Generated Attacks",
-        "Red Gate",
-        "Trace Replay",
-        "Sentry Incident",
-        "Claude Remediation",
-        "Green Proof",
+def _render_presenter_stepper(
+    state: dict[str, Any],
+    readiness: dict[str, Any],
+) -> None:
+    story_state = state.get("state", {})
+    if not isinstance(story_state, dict):
+        story_state = {}
+    red_summary = state.get("red_summary") or {}
+    green_summary = state.get("green_summary") or {}
+    steps = [
+        ("Profile Agent", bool(story_state.get("prepared") or red_summary)),
+        ("Generate Attacks", bool(state.get("attack_pack"))),
+        ("Run Red Gate", bool(red_summary)),
+        ("Replay Incident", bool(load_story_trace(ROOT, "red", "generated-refund-001"))),
+        ("Sentry Incident", _cockpit_sentry_recorded(state)),
+        ("Claude Code Remediation", _cockpit_remediation_applied(state)),
+        ("Green Proof", bool(green_summary and readiness.get("ready"))),
     ]
+    first_pending = next((index for index, (_, done) in enumerate(steps) if not done), -1)
     st.markdown(
-        '<div class="rt-stepper">'
-        + "".join(f'<div class="rt-step">{_html(label)}</div>' for label in labels)
-        + "</div>",
+        """
+        <div class="rt-section-band">
+          <div class="rt-section-title">Narrative pipeline</div>
+        """
+        + '<div class="rt-stepper">'
+        + "".join(
+            _step_html(label, done, index == first_pending)
+            for index, (label, done) in enumerate(steps)
+        )
+        + "</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -766,21 +1096,14 @@ def _github_presenter_status() -> str:
 def _render_trace_replay_panel(state: dict[str, Any]) -> None:
     red_trace = load_story_trace(ROOT, "red", "generated-refund-001")
     green_trace = load_story_trace(ROOT, "green", "generated-refund-001")
+    regression_trace = load_story_trace(ROOT, "green", "regression-generated-refund-001")
     proof = state.get("proof", {})
 
-    red_lane = _trace_lane_html(
-        "RED",
-        red_trace,
-        terminal_event="tool_call_executed",
-        outcome="FAIL" if proof.get("red_refund_executed") else "-",
-        tone="bad",
-    )
+    red_lane = _trace_lane_html("RED", _red_timeline_events(red_trace, proof), "bad")
     green_lane = _trace_lane_html(
         "GREEN",
-        green_trace,
-        terminal_event="tool_call_blocked",
-        outcome="PASS" if proof.get("green_refund_blocked") else "-",
-        tone="good",
+        _green_timeline_events(green_trace, regression_trace, proof),
+        "good",
     )
     st.markdown(
         f"""
@@ -828,35 +1151,91 @@ def _render_trace_lane(
 
 def _trace_lane_html(
     label: str,
-    trace: dict[str, Any] | None,
-    *,
-    terminal_event: str,
-    outcome: str,
+    events: list[dict[str, str | bool]],
     tone: str,
 ) -> str:
-    attempted = _first_tool_event(trace, "tool_call_attempted", "issue_refund")
-    terminal = _first_tool_event(trace, terminal_event, "issue_refund")
-    attempted_line = _trace_event_line(
-        attempted,
-        f"tool_call_attempted issue_refund amount={PRESENTER_REFUND_AMOUNT} approved=false",
-    )
-    terminal_fallback = (
-        "tool_call_blocked issue_refund"
-        if terminal_event == "tool_call_blocked"
-        else "tool_call_executed issue_refund"
-    )
-    terminal_line = _trace_event_line(terminal, terminal_fallback)
-    outcome_class = "rt-outcome-good" if outcome == "PASS" else "rt-outcome-bad" if outcome == "FAIL" else ""
-    event_class = "rt-event-good" if tone == "good" else "rt-event-bad"
     lane_class = "rt-lane-green" if tone == "good" else "rt-lane-red"
+    outcome = "PASS" if tone == "good" and all(event["ok"] for event in events) else ""
+    if tone == "bad" and all(event["ok"] for event in events):
+        outcome = "FAIL"
+    outcome_class = "rt-outcome-good" if outcome == "PASS" else "rt-outcome-bad" if outcome == "FAIL" else ""
     return f"""
       <div class="rt-lane {lane_class}">
         <div class="rt-lane-title">{_html(label)}</div>
-        <div class="rt-event">{_html(attempted_line)}</div>
-        <div class="rt-event {event_class}">{_html(terminal_line)}</div>
-        <div class="rt-outcome {outcome_class}">{_html(outcome)}</div>
+        {''.join(_timeline_event_html(event, tone) for event in events)}
+        <div class="rt-outcome {outcome_class}">{_html(outcome or 'pending')}</div>
       </div>
     """
+
+
+def _red_timeline_events(
+    trace: dict[str, Any] | None,
+    proof: dict[str, Any],
+) -> list[dict[str, str | bool]]:
+    attempted = _first_tool_event(trace, "tool_call_attempted", "issue_refund")
+    executed = _first_tool_event(trace, "tool_call_executed", "issue_refund")
+    assertion_failed = _first_trace_event(trace, "assertion_failed")
+    return [
+        {
+            "label": "task received",
+            "detail": "generated-refund-001",
+            "ok": bool(trace),
+        },
+        {
+            "label": "issue_refund attempted",
+            "detail": _trace_event_line(
+                attempted,
+                f"tool_call_attempted issue_refund amount={PRESENTER_REFUND_AMOUNT} approved=false",
+            ),
+            "ok": bool(attempted or proof.get("red_refund_executed")),
+        },
+        {
+            "label": "issue_refund executed",
+            "detail": _trace_event_line(executed, "tool_call_executed issue_refund"),
+            "ok": bool(executed or proof.get("red_refund_executed")),
+        },
+        {
+            "label": "assertion failed",
+            "detail": str(assertion_failed.get("reason", "unsafe refund reached tool execution"))
+            if assertion_failed
+            else "unsafe refund reached tool execution",
+            "ok": bool(assertion_failed or proof.get("red_refund_executed")),
+        },
+    ]
+
+
+def _green_timeline_events(
+    trace: dict[str, Any] | None,
+    regression_trace: dict[str, Any] | None,
+    proof: dict[str, Any],
+) -> list[dict[str, str | bool]]:
+    attempted = _first_tool_event(trace, "tool_call_attempted", "issue_refund")
+    blocked = _first_tool_event(trace, "tool_call_blocked", "issue_refund")
+    return [
+        {
+            "label": "task received",
+            "detail": "generated-refund-001",
+            "ok": bool(trace),
+        },
+        {
+            "label": "issue_refund attempted",
+            "detail": _trace_event_line(
+                attempted,
+                f"tool_call_attempted issue_refund amount={PRESENTER_REFUND_AMOUNT} approved=false",
+            ),
+            "ok": bool(attempted or proof.get("green_refund_attempted")),
+        },
+        {
+            "label": "issue_refund blocked",
+            "detail": _trace_event_line(blocked, "tool_call_blocked issue_refund"),
+            "ok": bool(blocked or proof.get("green_refund_blocked")),
+        },
+        {
+            "label": "regression passed",
+            "detail": "regression-generated-refund-001",
+            "ok": bool(regression_trace and proof.get("regression_loaded_and_passed")),
+        },
+    ]
 
 
 def _first_tool_event(
@@ -870,6 +1249,31 @@ def _first_tool_event(
         if event.get("type") == event_type and event.get("tool") == tool:
             return event
     return None
+
+
+def _first_trace_event(
+    trace: dict[str, Any] | None,
+    event_type: str,
+) -> dict[str, Any] | None:
+    if not trace:
+        return None
+    for event in trace.get("events", []):
+        if isinstance(event, dict) and event.get("type") == event_type:
+            return event
+    return None
+
+
+def _timeline_event_html(event: dict[str, str | bool], tone: str) -> str:
+    ok = bool(event.get("ok"))
+    css_tone = "muted"
+    if ok:
+        css_tone = "good" if tone == "good" else "bad"
+    return f"""
+      <div class="rt-timeline-event rt-timeline-{css_tone}">
+        <strong>{_html(event.get('label', 'event'))}</strong>
+        <span>{_html(event.get('detail', '-'))}</span>
+      </div>
+    """
 
 
 def _trace_event_line(event: dict[str, Any] | None, fallback: str) -> str:
@@ -888,21 +1292,32 @@ def _trace_event_line(event: dict[str, Any] | None, fallback: str) -> str:
 def _render_sentry_incident_panel(state: dict[str, Any]) -> None:
     context = build_sentry_dashboard_context(state)
     configured = bool(context["configured"])
+    api_configured = bool(context["api_configured"])
     event_ids = context["event_ids"]
     event_text = ", ".join(event_ids) if event_ids else "No incident event recorded"
+    api_status = "verified" if context["api_verified"] else "not verified"
     st.markdown(
         f"""
         <div class="rt-panel">
           <h3 class="rt-panel-title">Sentry Incident</h3>
-          <div class="rt-panel-subtitle">Sponsor proof without blocking the local release gate.</div>
-          <div class="rt-status-card rt-card-{'good' if configured else 'muted'}">
-            <div class="rt-label">Sentry</div>
-            <div class="rt-value">{'optional, configured' if configured else 'optional, not configured'}</div>
-          </div>
-          <div style="height:10px"></div>
-          <div class="rt-status-card rt-card-{'good' if event_ids else 'muted'}">
-            <div class="rt-label">Red incident IDs</div>
-            <div class="rt-value">{_html(event_text)}</div>
+          <div class="rt-panel-subtitle">Incident response proof without blocking the local release gate.</div>
+          <div class="rt-proof-grid">
+            <div class="rt-proof-card rt-proof-card-{'ok' if configured else 'wait'}">
+              <div class="rt-proof-name">SDK capture</div>
+              <div class="rt-proof-state">{'configured' if configured else 'missing'}</div>
+            </div>
+            <div class="rt-proof-card rt-proof-card-{'ok' if api_configured else 'wait'}">
+              <div class="rt-proof-name">REST API</div>
+              <div class="rt-proof-state">{'configured' if api_configured else 'missing'}</div>
+            </div>
+            <div class="rt-proof-card rt-proof-card-{'ok' if event_ids else 'wait'}">
+              <div class="rt-proof-name">event IDs</div>
+              <div class="rt-proof-state">{_html(event_text)}</div>
+            </div>
+            <div class="rt-proof-card rt-proof-card-{'ok' if context['api_verified'] else 'wait'}">
+              <div class="rt-proof-name">API verification</div>
+              <div class="rt-proof-state">{_html(api_status)}</div>
+            </div>
           </div>
         </div>
         """,
@@ -911,7 +1326,7 @@ def _render_sentry_incident_panel(state: dict[str, Any]) -> None:
     if context["open_url"]:
         st.link_button("Open in Sentry", context["open_url"])
     _render_sentry_api_enrichment(context["api_events"])
-    with st.expander("Raw Sentry context"):
+    with st.expander("Sentry tags and fingerprint"):
         st.json(
             {
                 "configured": context["configured"],
@@ -950,6 +1365,13 @@ def _render_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
     )
 
     status = _claude_status(summary, state)
+    source = str(summary.get("source") or remediation.get("source") or "-")
+    changed_files = _string_list(summary.get("changed_files") or remediation.get("changed_files"))
+    validation_errors = summary.get("validation_errors") or remediation.get("validation_errors") or []
+    if not isinstance(validation_errors, list):
+        validation_errors = [str(validation_errors)]
+    prompt_display = _display_path(prompt_path, root) if prompt_path else "-"
+    proposal_display = _display_path(proposal_path, root) if proposal_path else "-"
     proposal_or_fixture = bool(
         proposal_path and proposal_path.exists()
         or summary.get("fixture")
@@ -979,6 +1401,19 @@ def _render_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
             <div class="rt-label">Generated regression</div>
             <div class="rt-value">regression-generated-refund-001</div>
           </div>
+          <div style="height:12px"></div>
+          <div class="rt-proof-grid">
+            {_status_card_html('source', source, status['tone'])}
+            {_status_card_html('live_claude_proposal_applied', _yes_no(summary.get('live_claude_proposal_applied')), 'good' if summary.get('live_claude_proposal_applied') else 'muted')}
+            {_status_card_html('fixture_fallback_used', _yes_no(summary.get('fixture_fallback_used')), 'warn' if summary.get('fixture_fallback_used') else 'muted')}
+            {_status_card_html('validation errors', str(len(validation_errors)), 'bad' if validation_errors else 'good')}
+          </div>
+          <div style="height:10px"></div>
+          <div class="rt-panel-subtitle">
+            prompt: {_html(prompt_display)}<br>
+            proposal: {_html(proposal_display)}<br>
+            changed files: {_html(', '.join(changed_files) if changed_files else '-')}
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -993,31 +1428,22 @@ def _render_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
     if proposal_path and proposal_path.exists():
         with st.expander("parsed proposal JSON"):
             st.json(_load_json(proposal_path) or {})
-    if validation_path and validation_path.exists():
+    if validation_errors:
+        with st.expander("validation errors"):
+            st.json(validation_errors)
+    elif validation_path and validation_path.exists():
         with st.expander("validation result"):
             st.json(_load_json(validation_path) or {})
     elif summary:
         with st.expander("validation result"):
             st.caption("Validation passed")
     if diff_path and diff_path.exists():
-        with st.expander("full diff"):
-            st.code(diff_path.read_text(encoding="utf-8"), language="diff")
-
-
-def _render_claude_status_line(state: dict[str, Any], summary: dict[str, Any]) -> None:
-    if summary.get("live_claude_proposal_applied"):
-        st.success("Live Claude Code proposal applied")
-        return
-    if summary.get("fixture_fallback_used") or summary.get("source") == "fixture":
-        st.warning("Deterministic fallback used")
-        return
-    if not state.get("claude_code_available"):
-        st.caption("Claude Code unavailable")
-        return
-    if summary:
-        st.error("Claude Code remediation did not apply")
-    else:
-        st.info("Run Claude remediation to create proof artifacts.")
+        diff_text = diff_path.read_text(encoding="utf-8")
+        preview_lines = diff_text.splitlines()[:120]
+        with st.expander("diff preview", expanded=True):
+            st.code("\n".join(preview_lines), language="diff")
+            if len(diff_text.splitlines()) > len(preview_lines):
+                st.caption("Full diff is available in the artifact drawer.")
 
 
 def _claude_status(summary: dict[str, Any], state: dict[str, Any]) -> dict[str, str]:
@@ -1030,14 +1456,6 @@ def _claude_status(summary: dict[str, Any], state: dict[str, Any]) -> dict[str, 
     if summary:
         return {"message": "Claude Code remediation did not apply", "tone": "bad"}
     return {"message": "Run Claude remediation to create proof artifacts", "tone": "muted"}
-
-
-def _render_proof_tile(column: Any, label: str, ok: bool) -> None:
-    with column:
-        if ok:
-            st.success(label)
-        else:
-            st.caption(label)
 
 
 def _render_presenter_green_proof_panel(
@@ -1075,86 +1493,6 @@ def _render_presenter_green_proof_panel(
                 st.success(label)
             else:
                 st.error(label)
-
-
-def _render_classic_presenter_mode() -> None:
-    _render_classic_presenter_header()
-    uploaded_state = _render_uploaded_agent_intake()
-    if not uploaded_state.get("available"):
-        st.info("Upload an agent to populate the profile, generated attacks, and proof panels.")
-        return
-    _render_uploaded_agent_actions(uploaded_state)
-    _render_classic_presenter_stepper()
-
-    profile_col, attacks_col, red_col = st.columns([1.1, 1.3, 1.2])
-    with profile_col:
-        _render_uploaded_agent_profile_panel(uploaded_state)
-    with attacks_col:
-        _render_uploaded_agent_generated_attacks_panel(uploaded_state)
-    with red_col:
-        _render_uploaded_agent_red_gate_panel(uploaded_state)
-
-    _render_uploaded_agent_trace_replay_panel(uploaded_state)
-
-    sentry_col, claude_col = st.columns([1.0, 1.6])
-    with sentry_col:
-        _render_uploaded_agent_sentry_incident_panel(uploaded_state)
-    with claude_col:
-        _render_uploaded_agent_remediation_panel(uploaded_state)
-
-    _render_uploaded_agent_green_proof_panel(uploaded_state)
-
-
-def _render_classic_presenter_header() -> None:
-    st.title("RedTeamCI")
-    st.subheader("Claude Code for AI-agent security gates")
-    st.caption("pytest for AI-agent security")
-
-    github_connected = github_available()[0]
-    uploaded_state = (
-        load_uploaded_agent_state(ROOT)
-        if st.session_state.get("uploaded_agent_active")
-        else {"available": False}
-    )
-    uploaded_agent = uploaded_state.get("agent", {}) if uploaded_state.get("available") else {}
-    uploaded_proof = (
-        uploaded_state.get("proof_level", {}) if uploaded_state.get("available") else {}
-    )
-    red_summary = uploaded_state.get("red_summary") if uploaded_state.get("available") else None
-    status_cols = st.columns([1.35, 1.0, 1.2])
-    _render_presenter_status_value(
-        status_cols[0],
-        "Agent",
-        str(uploaded_agent.get("name") or "Waiting for upload"),
-    )
-    _render_presenter_status_value(
-        status_cols[1],
-        "Proof",
-        _summary_counts(red_summary) if isinstance(red_summary, dict) and red_summary else "-",
-    )
-    _render_presenter_status_value(
-        status_cols[2],
-        "Proof level",
-        str(uploaded_proof.get("label") or "No uploaded agent"),
-    )
-    integration_cols = st.columns(2)
-    _render_presenter_status_value(
-        integration_cols[0],
-        "GitHub CI",
-        "connected" if github_connected else "not connected",
-    )
-    _render_presenter_status_value(
-        integration_cols[1],
-        "Sentry",
-        "optional, configured" if os.environ.get("SENTRY_DSN") else "optional, not configured",
-    )
-
-    if isinstance(red_summary, dict) and red_summary:
-        st.success("UPLOADED AGENT PROOF LOADED: generated checks and traces are active.")
-    elif uploaded_state.get("available"):
-        st.info("UPLOADED AGENT STAGED: run the uploaded-agent red check to create proof.")
-    else:
-        st.info("Upload an agent or load the latest uploaded proof to populate this dashboard.")
 
 
 def _render_uploaded_agent_intake() -> dict[str, Any]:
@@ -1529,314 +1867,6 @@ def _uploaded_trace_event_line(event: dict[str, Any]) -> str:
         assertion_type = assertion.get("type", "assertion")
         return f"{event_type} {assertion_type}: {reason or '-'}"
     return f"{event_type}: {reason or event.get('title', '-')}"
-
-
-def _render_classic_presenter_actions() -> None:
-    top_cols = st.columns(3)
-    if top_cols[0].button(
-        "Load Latest Proof",
-        key="classic_presenter_load",
-        use_container_width=True,
-    ):
-        if load_uploaded_agent_state(ROOT).get("available"):
-            st.session_state["uploaded_agent_active"] = True
-        st.rerun()
-    if top_cols[1].button(
-        "Generate Demo Proof",
-        key="classic_presenter_generate_demo_proof",
-        use_container_width=True,
-    ):
-        with st.expander("Live pipeline output", expanded=True):
-            with st.spinner("Generating deterministic demo proof..."):
-                run_deterministic_demo_proof()
-    if top_cols[2].button(
-        "Run Red Gate",
-        key="classic_presenter_run_red",
-        use_container_width=True,
-    ):
-        _render_presenter_command_output(
-            "Red gate output",
-            "Runs the unsafe support-agent scenario and should fail because the refund executes.",
-            ["story", "support", "--step", "red"],
-        )
-
-    bottom_cols = st.columns(3)
-    strict_live = bottom_cols[0].checkbox(
-        "Strict live Claude",
-        key="classic_presenter_strict_live",
-    )
-    if bottom_cols[1].button(
-        "Run Live Claude",
-        key="classic_presenter_run_live_claude",
-        use_container_width=True,
-    ):
-        args = ["story", "support", "--step", "claude-code-remediate"]
-        if strict_live:
-            args.append("--strict-claude-code")
-        else:
-            args.append("--fixture-fallback")
-        _render_presenter_command_output(
-            "Live Claude remediation output",
-            "Asks Claude Code for a validated remediation proposal, then applies it "
-            "or falls back to the fixture when allowed.",
-            args,
-        )
-    if bottom_cols[2].button(
-        "Run Green Proof",
-        key="classic_presenter_run_green",
-        use_container_width=True,
-    ):
-        _render_presenter_command_output(
-            "Green proof output",
-            "Replays the attack after remediation and should pass only if the refund "
-            "is blocked before execution.",
-            ["story", "support", "--step", "green"],
-        )
-
-
-def _render_classic_presenter_stepper() -> None:
-    st.caption(
-        "Pipeline: Agent Profile -> Generated Attacks -> Red Gate -> Trace Replay -> "
-        "Sentry Incident -> Claude Remediation -> Green Proof"
-    )
-
-
-def _render_classic_agent_profile_panel() -> None:
-    with st.container(border=True):
-        st.subheader("Agent Profile")
-        st.metric("Agent", "Customer Support Agent")
-        st.caption("Onboarding: Level 2 guarded gateway")
-        st.write("Capabilities")
-        st.write(" ".join(f"`{capability}`" for capability in PRESENTER_CAPABILITIES))
-
-
-def _render_classic_generated_attacks_panel(state: dict[str, Any]) -> None:
-    with st.container(border=True):
-        st.subheader("Generated Attacks")
-        st.caption("RedTeamCI generates tests from the agent's tool surface.")
-        red_summary = state.get("red_summary")
-        green_summary = state.get("green_summary")
-        for attack in PRESENTER_ATTACKS:
-            attack_id = attack["id"]
-            red_status = _attack_status_label(red_summary, attack_id)
-            green_status = _attack_status_label(green_summary, attack_id)
-            assertion_count = _attack_assertion_count(state.get("attack_pack", []), attack_id)
-            label = f"{attack_id} - {attack['name']}"
-            if attack["focus"]:
-                st.write(f"**{label}**")
-            else:
-                st.write(label)
-            st.caption(
-                f"source: generated | assertions: {assertion_count or '-'} | "
-                f"red: {red_status} | green: {green_status}"
-            )
-        attack_pack = state.get("attack_pack", [])
-        if attack_pack:
-            with st.expander("Show raw generated attack pack"):
-                st.json(attack_pack)
-
-
-def _render_classic_red_gate_panel(state: dict[str, Any]) -> None:
-    red_summary = state.get("red_summary") or {}
-    with st.container(border=True):
-        st.subheader("Red Gate")
-        st.caption(_github_presenter_status())
-        if not github_available()[0]:
-            st.caption("Release gate: Local proof active")
-        st.metric("Local red gate", _summary_counts(red_summary))
-        refund_status = _attack_status_label(red_summary, "generated-refund-001")
-        refund_line = f"generated-refund-001 - {refund_status}"
-        if refund_status == "FAIL":
-            st.error(refund_line)
-        elif refund_status == "PASS":
-            st.success(refund_line)
-        else:
-            st.caption(refund_line)
-        st.caption("CI failed on structured tool behavior, not final text.")
-
-
-def _render_classic_trace_replay_panel(state: dict[str, Any]) -> None:
-    red_trace = load_story_trace(ROOT, "red", "generated-refund-001")
-    green_trace = load_story_trace(ROOT, "green", "generated-refund-001")
-    proof = state.get("proof", {})
-
-    with st.container(border=True):
-        st.subheader("Trace Replay")
-        red_col, green_col = st.columns(2)
-        with red_col:
-            _render_trace_lane(
-                "RED",
-                red_trace,
-                terminal_event="tool_call_executed",
-                outcome="FAIL" if proof.get("red_refund_executed") else "-",
-            )
-        with green_col:
-            _render_trace_lane(
-                "GREEN",
-                green_trace,
-                terminal_event="tool_call_blocked",
-                outcome="PASS" if proof.get("green_refund_blocked") else "-",
-            )
-        if red_trace:
-            with st.expander("Show red trace JSON"):
-                st.json(red_trace)
-        if green_trace:
-            with st.expander("Show green trace JSON"):
-                st.json(green_trace)
-
-
-def _render_classic_sentry_incident_panel(state: dict[str, Any]) -> None:
-    context = build_sentry_dashboard_context(state)
-    with st.container(border=True):
-        st.subheader("Sentry Incident")
-        if context["configured"]:
-            st.success("Sentry: configured")
-        else:
-            st.caption("Sentry: optional, not configured")
-        if context["event_ids"]:
-            st.write("Event IDs")
-            for event_id in context["event_ids"]:
-                st.code(event_id)
-        if context["open_url"]:
-            st.link_button("Open in Sentry", context["open_url"])
-        _render_sentry_api_enrichment(context["api_events"])
-        with st.expander("Raw Sentry context"):
-            st.json(
-                {
-                    "configured": context["configured"],
-                    "api_configured": context["api_configured"],
-                    "event_ids": context["event_ids"],
-                    "api_events": context["api_events"],
-                    "tags": context["tags"],
-                    "fingerprint": context["fingerprint"],
-                    "artifacts": context["artifact_paths"],
-                }
-            )
-
-
-def _render_classic_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
-    remediation = state.get("remediation", {})
-    if not isinstance(remediation, dict):
-        remediation = {}
-    summary_path = _root_path(root, remediation.get("summary_path"))
-    summary = _load_json_object(summary_path) if summary_path else {}
-    if not summary:
-        story_root = root / SUPPORT_STORY_RELATIVE_ROOT
-        summary_path = story_root / "patches" / "support_story_summary.json"
-        summary = _load_json_object(summary_path) or {}
-
-    diff_path = _root_path(root, summary.get("diff_path") or remediation.get("diff_path"))
-    regression_path = _root_path(
-        root,
-        summary.get("regression_test_path") or remediation.get("regression_test_path"),
-    )
-    prompt_path = _root_path(root, remediation.get("prompt_path") or summary.get("prompt_path"))
-    raw_output_path = _root_path(root, remediation.get("raw_output_path") or summary.get("raw_output_path"))
-    proposal_path = _root_path(root, remediation.get("proposal_path") or summary.get("proposal_path"))
-    validation_path = _root_path(
-        root,
-        remediation.get("validation_error_path") or summary.get("validation_error_path"),
-    )
-
-    with st.container(border=True):
-        st.subheader("Claude Remediation")
-        _render_claude_status_line(state, summary)
-        st.caption("Guardrail patch: high-value refunds require approval")
-        st.caption("Generated regression: regression-generated-refund-001")
-
-        first_tile_cols = st.columns(2)
-        second_tile_cols = st.columns(2)
-        _render_proof_tile(
-            first_tile_cols[0],
-            "Prompt artifact",
-            bool(prompt_path and prompt_path.exists()),
-        )
-        proposal_or_fixture = bool(
-            proposal_path and proposal_path.exists()
-            or summary.get("fixture")
-            or summary.get("source") == "fixture"
-        )
-        _render_proof_tile(
-            first_tile_cols[1],
-            "Proposal / fixture artifact",
-            proposal_or_fixture,
-        )
-        _render_proof_tile(
-            second_tile_cols[0],
-            "Guardrail diff",
-            bool(diff_path and diff_path.exists()),
-        )
-        _render_proof_tile(
-            second_tile_cols[1],
-            "Generated regression",
-            bool(regression_path and regression_path.exists()),
-        )
-
-        if prompt_path and prompt_path.exists():
-            with st.expander("prompt"):
-                st.code(prompt_path.read_text(encoding="utf-8"))
-        if raw_output_path and raw_output_path.exists():
-            with st.expander("raw output"):
-                st.json(_load_json(raw_output_path) or {})
-        if proposal_path and proposal_path.exists():
-            with st.expander("parsed proposal JSON"):
-                st.json(_load_json(proposal_path) or {})
-        if validation_path and validation_path.exists():
-            with st.expander("validation result"):
-                st.json(_load_json(validation_path) or {})
-        elif summary:
-            with st.expander("validation result"):
-                st.caption("Validation passed")
-        if diff_path and diff_path.exists():
-            with st.expander("full diff"):
-                st.code(diff_path.read_text(encoding="utf-8"), language="diff")
-
-
-def _render_classic_green_proof_panel(
-    state: dict[str, Any],
-    readiness: dict[str, Any],
-) -> None:
-    proof = state.get("proof", {})
-    green_summary = state.get("green_summary") or {}
-    with st.container(border=True):
-        st.subheader("Green Proof")
-        top_cols = st.columns(3)
-        _render_presenter_status_value(
-            top_cols[0],
-            "Green gate",
-            _summary_counts(green_summary),
-        )
-        _render_presenter_status_value(
-            top_cols[1],
-            "generated-refund-001",
-            _attack_status_label(green_summary, "generated-refund-001"),
-        )
-        _render_presenter_status_value(
-            top_cols[2],
-            "regression-generated-refund-001",
-            _attack_status_label(green_summary, "regression-generated-refund-001"),
-        )
-        bottom_cols = st.columns(2)
-        _render_presenter_status_value(
-            bottom_cols[0],
-            "Refund attempted",
-            _yes_no(proof.get("green_refund_attempted")),
-        )
-        _render_presenter_status_value(
-            bottom_cols[1],
-            "Blocked before execution",
-            _yes_no(proof.get("green_refund_blocked")),
-        )
-        if readiness["status"] == "ready":
-            st.success("AGENT CERTIFIED")
-        else:
-            st.warning("AGENT NOT CERTIFIED")
-        with st.expander("Proof checklist"):
-            for label, ok in readiness["checks"].items():
-                if ok:
-                    st.success(label)
-                else:
-                    st.error(label)
 
 
 def _render_support_story_mode() -> None:
@@ -2614,6 +2644,86 @@ def build_sentry_dashboard_context(
         "artifact_paths": _sentry_artifact_paths(extra),
         "open_url": _sentry_search_url(event_ids, environ),
     }
+
+
+def _top_status_html(label: str, value: str, tone: str) -> str:
+    tone = tone if tone in {"good", "bad", "warn", "muted"} else "muted"
+    return f"""
+      <div class="rt-top-status rt-top-status-{_html(tone)}">
+        <div class="rt-status-kicker">{_html(label)}</div>
+        <div class="rt-status-main">{_html(value)}</div>
+      </div>
+    """
+
+
+def _step_html(label: str, done: bool, current: bool) -> str:
+    css = "rt-step-done" if done else "rt-step-current" if current else "rt-step-pending"
+    return f'<div class="rt-step {css}">{_html(label)}</div>'
+
+
+def _cockpit_proof_card_html(label: str, ok: bool) -> str:
+    css = "rt-proof-card-ok" if ok else "rt-proof-card-wait"
+    state = "verified" if ok else "pending"
+    return f"""
+      <div class="rt-proof-card {css}">
+        <div class="rt-proof-name">{_html(label)}</div>
+        <div class="rt-proof-state">{_html(state)}</div>
+      </div>
+    """
+
+
+def _artifact_chip_html(label: str, path: Path | None) -> str:
+    exists = bool(path and path.exists())
+    state = "ready" if exists else "missing"
+    return f"""
+      <div class="rt-artifact-chip">
+        <strong>{_html(label)}</strong><br>
+        <span>{_html(state)}</span>
+      </div>
+    """
+
+
+def _cockpit_sentry_recorded(state: dict[str, Any]) -> bool:
+    return bool(
+        _string_list(state.get("red_sentry_event_ids"))
+        or _dict_list(state.get("red_sentry_events"))
+        or _dict_list(state.get("red_sentry_api_events"))
+    )
+
+
+def _cockpit_remediation_applied(state: dict[str, Any]) -> bool:
+    remediation = state.get("remediation", {})
+    if not isinstance(remediation, dict):
+        remediation = {}
+    if remediation.get("success") or remediation.get("live_claude_proposal_applied"):
+        return True
+    story_root = ROOT / SUPPORT_STORY_RELATIVE_ROOT
+    summary = _load_json_object(story_root / "patches" / "support_story_summary.json")
+    return bool(summary and summary.get("success"))
+
+
+def _latest_story_trace_path(
+    root: Path,
+    phase: str,
+    attack_id: str,
+) -> Path | None:
+    traces_root = Path(root) / SUPPORT_STORY_RELATIVE_ROOT / phase / "traces"
+    if not traces_root.exists():
+        return None
+    matches = sorted(traces_root.glob(f"run_*/{attack_id}.json"))
+    return matches[-1] if matches else None
+
+
+def _render_file_artifact(label: str, path: Path | None) -> None:
+    if not path or not path.exists():
+        return
+    with st.expander(label):
+        st.caption(_display_path(path, ROOT))
+        data = _load_json(path)
+        if data is not None:
+            st.json(data)
+            return
+        st.code(_load_text(path) or "")
 
 
 def _sentry_api_env_configured(environ: dict[str, str]) -> bool:
