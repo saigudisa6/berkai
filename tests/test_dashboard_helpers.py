@@ -6,6 +6,8 @@ from pathlib import Path
 from redteamci.dashboard import (
     LEVEL_1_WARNING,
     build_sentry_dashboard_context,
+    demo_readiness_status,
+    deterministic_demo_proof_commands,
     load_generated_plan_panel,
     load_support_story_dashboard_state,
     onboarding_level_notice,
@@ -181,6 +183,71 @@ class DashboardHelperTest(unittest.TestCase):
             "Level 2 guarded gateway",
         )
 
+    def test_deterministic_demo_proof_commands_use_fixture_path(self) -> None:
+        self.assertEqual(
+            deterministic_demo_proof_commands(),
+            [
+                ["story", "support", "--step", "prepare"],
+                ["story", "support", "--step", "plan"],
+                ["story", "support", "--step", "red"],
+                ["story", "support", "--step", "remediate"],
+                ["story", "support", "--step", "green"],
+            ],
+        )
+
+    def test_demo_readiness_status_requires_complete_proof_chain(self) -> None:
+        empty = demo_readiness_status({"available": False})
+        self.assertEqual(empty["status"], "empty")
+        self.assertEqual(empty["label"], "NO RUN YET")
+
+        red_only = demo_readiness_status(
+            {
+                "available": True,
+                "red_summary": {"failed": 3, "passed": 1},
+                "proof": {"red_refund_executed": True},
+            }
+        )
+        self.assertEqual(red_only["status"], "partial")
+        self.assertEqual(red_only["label"], "INCOMPLETE")
+        self.assertFalse(red_only["ready"])
+
+        failed_green = demo_readiness_status(
+            {
+                "available": True,
+                "proof": {
+                    "red_refund_executed": True,
+                    "green_refund_attempted": True,
+                    "green_refund_blocked": True,
+                    "green_blocked_before_execution_assertion_passed": True,
+                    "regression_loaded_and_passed": True,
+                    "green_failed": 1,
+                },
+                "remediation_summary_exists": True,
+                "generated_regression_exists": True,
+            }
+        )
+        self.assertEqual(failed_green["status"], "partial")
+        self.assertFalse(failed_green["checks"]["green failures = 0"])
+
+        ready = demo_readiness_status(
+            {
+                "available": True,
+                "proof": {
+                    "red_refund_executed": True,
+                    "green_refund_attempted": True,
+                    "green_refund_blocked": True,
+                    "green_blocked_before_execution_assertion_passed": True,
+                    "regression_loaded_and_passed": True,
+                    "green_failed": 0,
+                },
+                "remediation_summary_exists": True,
+                "generated_regression_exists": True,
+            }
+        )
+        self.assertEqual(ready["status"], "ready")
+        self.assertEqual(ready["label"], "DEMO READY")
+        self.assertTrue(ready["ready"])
+
     def test_support_story_dashboard_state_requires_hard_proof(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -238,11 +305,19 @@ class DashboardHelperTest(unittest.TestCase):
                 story / "plan" / "generated_support_attacks.json",
                 [{"id": "generated-refund-001"}],
             )
+            write_json(story / "patches" / "support_story_summary.json", {"success": True})
+            write_json(
+                story / "regressions" / "generated_attacks.json",
+                [{"id": "regression-generated-refund-001"}],
+            )
 
             state = load_support_story_dashboard_state(root)
 
         self.assertTrue(state["available"])
         self.assertTrue(support_story_certified(state["proof"]))
+        self.assertTrue(state["remediation_summary_exists"])
+        self.assertTrue(state["generated_regression_exists"])
+        self.assertEqual(demo_readiness_status(state)["status"], "ready")
         self.assertEqual(state["red_summary"]["failed"], 3)
         self.assertEqual(state["red_sentry_event_ids"], ["event-1", "event-2"])
         context = build_sentry_dashboard_context(

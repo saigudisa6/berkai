@@ -54,20 +54,41 @@ SUPPORT_STORY_ATTACKS = [
     "generated-pii-001",
     "regression-generated-refund-001",
 ]
+PRESENTER_ATTACKS = [
+    {
+        "id": "generated-refund-001",
+        "name": "unauthorized refund",
+        "focus": True,
+    },
+    {
+        "id": "generated-email-001",
+        "name": "external email exfiltration",
+        "focus": False,
+    },
+    {
+        "id": "generated-pii-001",
+        "name": "PII leakage",
+        "focus": False,
+    },
+]
+PRESENTER_CAPABILITIES = ["Refunds", "Email", "Customer Data", "PII"]
+DETERMINISTIC_DEMO_PROOF_STEPS = ["prepare", "plan", "red", "remediate", "green"]
 
 
 def main() -> None:
     streamlit = _require_streamlit()
     streamlit.set_page_config(page_title="RedTeamCI", layout="wide")
-    st.title("RedTeamCI")
-    st.caption("Crash-test your AI agent before production.")
 
-    story_tab, developer_tab, artifacts_tab = st.tabs(
-        ["Support Story", "Developer Mode", "Artifacts"]
+    presenter_tab, developer_tab, artifacts_tab = st.tabs(
+        ["Presenter Mode", "Developer Mode", "Artifacts"]
     )
-    with story_tab:
-        _render_support_story_mode()
+    with presenter_tab:
+        _render_presenter_mode()
     with developer_tab:
+        st.subheader("Support Story Deep Inspection")
+        _render_support_story_mode()
+        st.divider()
+        st.subheader("General Suite Developer Mode")
         before = _load_optional_summary(DEFAULT_BEFORE_SUMMARY_PATH)
         after = _load_optional_summary(DEFAULT_AFTER_SUMMARY_PATH)
         _render_top_metrics(before, after)
@@ -111,6 +132,415 @@ def _render_top_metrics(before: dict[str, Any] | None, after: dict[str, Any] | N
 def _render_demo_mode_actions() -> None:
     st.subheader("Demo Mode")
     _render_actions()
+
+
+def _render_presenter_mode() -> None:
+    state = load_support_story_dashboard_state(ROOT)
+    readiness = demo_readiness_status(state)
+
+    _render_presenter_header(state, readiness)
+    _render_presenter_actions()
+    _render_presenter_stepper()
+
+    profile_col, attacks_col, red_col = st.columns([1.1, 1.3, 1.2])
+    with profile_col:
+        _render_agent_profile_panel()
+    with attacks_col:
+        _render_generated_attacks_panel(state)
+    with red_col:
+        _render_red_gate_panel(state)
+
+    _render_trace_replay_panel(state)
+
+    sentry_col, claude_col = st.columns([1.0, 1.6])
+    with sentry_col:
+        _render_sentry_incident_panel(state)
+    with claude_col:
+        _render_claude_remediation_panel(ROOT, state)
+
+    _render_presenter_green_proof_panel(state, readiness)
+
+
+def _render_presenter_header(
+    state: dict[str, Any],
+    readiness: dict[str, Any],
+) -> None:
+    st.title("RedTeamCI")
+    st.subheader("Claude Code for AI-agent security gates")
+    st.caption("pytest for AI-agent security")
+
+    github_connected = github_available()[0]
+    sentry_context = build_sentry_dashboard_context(state)
+    status_cols = st.columns(5)
+    status_cols[0].metric("Scenario", "Customer Support Agent")
+    status_cols[1].metric("Proof", readiness["label"])
+    status_cols[2].metric("Release gate", "Local proof active")
+    status_cols[3].metric(
+        "GitHub CI",
+        "connected" if github_connected else "not connected",
+    )
+    status_cols[4].metric(
+        "Sentry",
+        "optional, configured" if sentry_context["configured"] else "optional, not configured",
+    )
+
+    if readiness["status"] == "ready":
+        st.success("DEMO READY: red exploit, remediation artifact, generated regression, and green proof are complete.")
+    elif readiness["status"] == "partial":
+        st.warning("INCOMPLETE: proof artifacts exist, but the full certification chain is not complete yet.")
+    else:
+        st.info("NO RUN YET: generate demo proof to create the local certification chain.")
+
+
+def _render_presenter_actions() -> None:
+    cols = st.columns(5)
+    if cols[0].button("Load Latest Proof", key="presenter_load", use_container_width=True):
+        st.rerun()
+    if cols[1].button(
+        "Generate Demo Proof",
+        key="presenter_generate_demo_proof",
+        use_container_width=True,
+    ):
+        with st.spinner("Generating deterministic demo proof..."):
+            run_deterministic_demo_proof()
+        st.rerun()
+    if cols[2].button("Run Red Gate", key="presenter_run_red", use_container_width=True):
+        run_cli(["story", "support", "--step", "red"])
+        st.rerun()
+
+    strict_live = st.checkbox("Strict live Claude", key="presenter_strict_live")
+    if cols[3].button(
+        "Run Live Claude",
+        key="presenter_run_live_claude",
+        use_container_width=True,
+    ):
+        args = ["story", "support", "--step", "claude-code-remediate"]
+        if strict_live:
+            args.append("--strict-claude-code")
+        else:
+            args.append("--fixture-fallback")
+        run_cli(args)
+        st.rerun()
+    if cols[4].button("Run Green Proof", key="presenter_run_green", use_container_width=True):
+        run_cli(["story", "support", "--step", "green"])
+        st.rerun()
+
+
+def deterministic_demo_proof_commands() -> list[list[str]]:
+    return [
+        ["story", "support", "--step", step]
+        for step in DETERMINISTIC_DEMO_PROOF_STEPS
+    ]
+
+
+def run_deterministic_demo_proof() -> None:
+    for command in deterministic_demo_proof_commands():
+        run_cli(command)
+
+
+def _render_presenter_stepper() -> None:
+    labels = [
+        "Agent Profile",
+        "Generated Attacks",
+        "Red Gate",
+        "Trace Replay",
+        "Sentry Incident",
+        "Claude Remediation",
+        "Green Proof",
+    ]
+    cols = st.columns(len(labels))
+    for col, label in zip(cols, labels):
+        col.caption(label)
+
+
+def _render_agent_profile_panel() -> None:
+    with st.container(border=True):
+        st.subheader("Agent Profile")
+        st.metric("Agent", "Customer Support Agent")
+        st.caption("Onboarding: Level 2 guarded gateway")
+        st.write("Capabilities")
+        st.write(" ".join(f"`{capability}`" for capability in PRESENTER_CAPABILITIES))
+
+
+def _render_generated_attacks_panel(state: dict[str, Any]) -> None:
+    with st.container(border=True):
+        st.subheader("Generated Attacks")
+        st.caption("RedTeamCI generates tests from the agent's tool surface.")
+        red_summary = state.get("red_summary")
+        green_summary = state.get("green_summary")
+        for attack in PRESENTER_ATTACKS:
+            attack_id = attack["id"]
+            red_status = _attack_status_label(red_summary, attack_id)
+            green_status = _attack_status_label(green_summary, attack_id)
+            assertion_count = _attack_assertion_count(state.get("attack_pack", []), attack_id)
+            label = f"{attack_id} - {attack['name']}"
+            if attack["focus"]:
+                st.write(f"**{label}**")
+            else:
+                st.write(label)
+            st.caption(
+                f"source: generated | assertions: {assertion_count or '-'} | "
+                f"red: {red_status} | green: {green_status}"
+            )
+        attack_pack = state.get("attack_pack", [])
+        if attack_pack:
+            with st.expander("Show raw generated attack pack"):
+                st.json(attack_pack)
+
+
+def _render_red_gate_panel(state: dict[str, Any]) -> None:
+    red_summary = state.get("red_summary") or {}
+    with st.container(border=True):
+        st.subheader("Red Gate")
+        st.caption(_github_presenter_status())
+        if not github_available()[0]:
+            st.caption("Release gate: Local proof active")
+        st.metric("Local red gate", _summary_counts(red_summary))
+        refund_status = _attack_status_label(red_summary, "generated-refund-001")
+        refund_line = f"generated-refund-001 - {refund_status}"
+        if refund_status == "FAIL":
+            st.error(refund_line)
+        elif refund_status == "PASS":
+            st.success(refund_line)
+        else:
+            st.caption(refund_line)
+        st.caption("CI failed on structured tool behavior, not final text.")
+
+
+def _github_presenter_status() -> str:
+    red_state = st.session_state.get("support_story_github_red")
+    if isinstance(red_state, dict):
+        conclusion = red_state.get("conclusion") or red_state.get("status")
+        if conclusion:
+            return f"GitHub CI: {conclusion}"
+    return "GitHub CI: connected" if github_available()[0] else "GitHub CI: not connected"
+
+
+def _render_trace_replay_panel(state: dict[str, Any]) -> None:
+    red_trace = load_story_trace(ROOT, "red", "generated-refund-001")
+    green_trace = load_story_trace(ROOT, "green", "generated-refund-001")
+    proof = state.get("proof", {})
+
+    with st.container(border=True):
+        st.subheader("Trace Replay")
+        red_col, green_col = st.columns(2)
+        with red_col:
+            _render_trace_lane(
+                "RED",
+                red_trace,
+                terminal_event="tool_call_executed",
+                outcome="FAIL" if proof.get("red_refund_executed") else "-",
+            )
+        with green_col:
+            _render_trace_lane(
+                "GREEN",
+                green_trace,
+                terminal_event="tool_call_blocked",
+                outcome="PASS" if proof.get("green_refund_blocked") else "-",
+            )
+        if red_trace:
+            with st.expander("Show red trace JSON"):
+                st.json(red_trace)
+        if green_trace:
+            with st.expander("Show green trace JSON"):
+                st.json(green_trace)
+
+
+def _render_trace_lane(
+    label: str,
+    trace: dict[str, Any] | None,
+    *,
+    terminal_event: str,
+    outcome: str,
+) -> None:
+    st.write(f"**{label}**")
+    attempted = _first_tool_event(trace, "tool_call_attempted", "issue_refund")
+    terminal = _first_tool_event(trace, terminal_event, "issue_refund")
+    st.code(_trace_event_line(attempted, "tool_call_attempted issue_refund amount=500 approved=false"))
+    if terminal_event == "tool_call_blocked":
+        fallback = "tool_call_blocked issue_refund"
+    else:
+        fallback = "tool_call_executed issue_refund"
+    st.code(_trace_event_line(terminal, fallback))
+    if outcome == "PASS":
+        st.success("PASS")
+    elif outcome == "FAIL":
+        st.error("FAIL")
+    else:
+        st.caption("-")
+
+
+def _first_tool_event(
+    trace: dict[str, Any] | None,
+    event_type: str,
+    tool: str,
+) -> dict[str, Any] | None:
+    if not trace:
+        return None
+    for event in trace.get("events", []):
+        if event.get("type") == event_type and event.get("tool") == tool:
+            return event
+    return None
+
+
+def _trace_event_line(event: dict[str, Any] | None, fallback: str) -> str:
+    if not event:
+        return fallback
+    event_type = str(event.get("type", "event"))
+    tool = str(event.get("tool", "tool"))
+    args = event.get("args", {})
+    if isinstance(args, dict) and event_type == "tool_call_attempted":
+        amount = args.get("amount", 500)
+        approved = str(args.get("approved", False)).lower()
+        return f"{event_type} {tool} amount={amount} approved={approved}"
+    return f"{event_type} {tool}"
+
+
+def _render_sentry_incident_panel(state: dict[str, Any]) -> None:
+    context = build_sentry_dashboard_context(state)
+    with st.container(border=True):
+        st.subheader("Sentry Incident")
+        if context["configured"]:
+            st.success("Sentry: configured")
+        else:
+            st.caption("Sentry: optional, not configured")
+        if context["event_ids"]:
+            st.write("Event IDs")
+            for event_id in context["event_ids"]:
+                st.code(event_id)
+        if context["open_url"]:
+            st.link_button("Open in Sentry", context["open_url"])
+        with st.expander("Raw Sentry context"):
+            st.json(
+                {
+                    "configured": context["configured"],
+                    "event_ids": context["event_ids"],
+                    "tags": context["tags"],
+                    "fingerprint": context["fingerprint"],
+                    "artifacts": context["artifact_paths"],
+                }
+            )
+
+
+def _render_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
+    remediation = state.get("remediation", {})
+    if not isinstance(remediation, dict):
+        remediation = {}
+    summary_path = _root_path(root, remediation.get("summary_path"))
+    summary = _load_json_object(summary_path) if summary_path else {}
+    if not summary:
+        story_root = root / SUPPORT_STORY_RELATIVE_ROOT
+        summary_path = story_root / "patches" / "support_story_summary.json"
+        summary = _load_json_object(summary_path) or {}
+
+    diff_path = _root_path(root, summary.get("diff_path") or remediation.get("diff_path"))
+    regression_path = _root_path(
+        root,
+        summary.get("regression_test_path") or remediation.get("regression_test_path"),
+    )
+    prompt_path = _root_path(root, remediation.get("prompt_path") or summary.get("prompt_path"))
+    raw_output_path = _root_path(root, remediation.get("raw_output_path") or summary.get("raw_output_path"))
+    proposal_path = _root_path(root, remediation.get("proposal_path") or summary.get("proposal_path"))
+    validation_path = _root_path(
+        root,
+        remediation.get("validation_error_path") or summary.get("validation_error_path"),
+    )
+
+    with st.container(border=True):
+        st.subheader("Claude Remediation")
+        _render_claude_status_line(state, summary)
+        st.caption("Guardrail patch: high-value refunds require approval")
+        st.caption("Generated regression: regression-generated-refund-001")
+
+        tile_cols = st.columns(4)
+        _render_proof_tile(tile_cols[0], "Prompt artifact", bool(prompt_path and prompt_path.exists()))
+        proposal_or_fixture = bool(
+            proposal_path and proposal_path.exists()
+            or summary.get("fixture")
+            or summary.get("source") == "fixture"
+        )
+        _render_proof_tile(tile_cols[1], "Proposal / fixture artifact", proposal_or_fixture)
+        _render_proof_tile(tile_cols[2], "Guardrail diff", bool(diff_path and diff_path.exists()))
+        _render_proof_tile(
+            tile_cols[3],
+            "Generated regression",
+            bool(regression_path and regression_path.exists()),
+        )
+
+        if prompt_path and prompt_path.exists():
+            with st.expander("prompt"):
+                st.code(prompt_path.read_text(encoding="utf-8"))
+        if raw_output_path and raw_output_path.exists():
+            with st.expander("raw output"):
+                st.json(_load_json(raw_output_path) or {})
+        if proposal_path and proposal_path.exists():
+            with st.expander("parsed proposal JSON"):
+                st.json(_load_json(proposal_path) or {})
+        if validation_path and validation_path.exists():
+            with st.expander("validation result"):
+                st.json(_load_json(validation_path) or {})
+        elif summary:
+            with st.expander("validation result"):
+                st.caption("Validation passed")
+        if diff_path and diff_path.exists():
+            with st.expander("full diff"):
+                st.code(diff_path.read_text(encoding="utf-8"), language="diff")
+
+
+def _render_claude_status_line(state: dict[str, Any], summary: dict[str, Any]) -> None:
+    if summary.get("live_claude_proposal_applied"):
+        st.success("Live Claude Code proposal applied")
+        return
+    if summary.get("fixture_fallback_used") or summary.get("source") == "fixture":
+        st.warning("Deterministic fallback used")
+        return
+    if not state.get("claude_code_available"):
+        st.caption("Claude Code unavailable")
+        return
+    if summary:
+        st.error("Claude Code remediation did not apply")
+    else:
+        st.info("Run Claude remediation to create proof artifacts.")
+
+
+def _render_proof_tile(column: Any, label: str, ok: bool) -> None:
+    with column:
+        if ok:
+            st.success(label)
+        else:
+            st.caption(label)
+
+
+def _render_presenter_green_proof_panel(
+    state: dict[str, Any],
+    readiness: dict[str, Any],
+) -> None:
+    proof = state.get("proof", {})
+    green_summary = state.get("green_summary") or {}
+    with st.container(border=True):
+        st.subheader("Green Proof")
+        cols = st.columns(5)
+        cols[0].metric("Green gate", _summary_counts(green_summary))
+        cols[1].metric(
+            "generated-refund-001",
+            _attack_status_label(green_summary, "generated-refund-001"),
+        )
+        cols[2].metric(
+            "regression-generated-refund-001",
+            _attack_status_label(green_summary, "regression-generated-refund-001"),
+        )
+        cols[3].metric("Refund attempted", _yes_no(proof.get("green_refund_attempted")))
+        cols[4].metric("Blocked before execution", _yes_no(proof.get("green_refund_blocked")))
+        if readiness["status"] == "ready":
+            st.success("AGENT CERTIFIED")
+        else:
+            st.warning("AGENT NOT CERTIFIED")
+        with st.expander("Proof checklist"):
+            for label, ok in readiness["checks"].items():
+                if ok:
+                    st.success(label)
+                else:
+                    st.error(label)
 
 
 def _render_support_story_mode() -> None:
@@ -538,6 +968,8 @@ def load_generated_plan_panel(root: Path = ROOT) -> dict[str, Any]:
 def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
     root = Path(root)
     story_root = root / SUPPORT_STORY_RELATIVE_ROOT
+    remediation_summary_path = story_root / "patches" / "support_story_summary.json"
+    generated_regression_path = story_root / "regressions" / "generated_attacks.json"
     red_summary = _load_json_object(story_root / "red" / "summary.json")
     green_summary = _load_json_object(story_root / "green" / "summary.json")
     state = _load_json_object(story_root / "state.json") or {}
@@ -577,6 +1009,8 @@ def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
         "green_sentry_verification_events": green_verification_events,
         "attack_pack": attack_pack,
         "artifacts": artifacts,
+        "remediation_summary_exists": remediation_summary_path.exists(),
+        "generated_regression_exists": generated_regression_path.exists(),
     }
 
 
@@ -591,6 +1025,71 @@ def support_story_certified(proof: dict[str, Any]) -> bool:
             int(proof.get("green_failed", 1)) == 0,
         ]
     )
+
+
+def demo_readiness_status(state: dict[str, Any]) -> dict[str, Any]:
+    proof = state.get("proof", {})
+    if not isinstance(proof, dict):
+        proof = {}
+    checks = {
+        "red refund executed": bool(proof.get("red_refund_executed")),
+        "green refund attempted": bool(proof.get("green_refund_attempted")),
+        "green refund blocked": bool(proof.get("green_refund_blocked")),
+        "blocked-before-execution assertion passed": bool(
+            proof.get("green_blocked_before_execution_assertion_passed")
+        ),
+        "regression loaded and passed": bool(proof.get("regression_loaded_and_passed")),
+        "green failures = 0": _green_failed_zero(proof),
+        "remediation summary exists": bool(state.get("remediation_summary_exists")),
+        "generated regression exists": bool(state.get("generated_regression_exists")),
+    }
+    if all(checks.values()):
+        return {
+            "status": "ready",
+            "label": "DEMO READY",
+            "ready": True,
+            "checks": checks,
+        }
+    if _has_support_story_evidence(state, checks):
+        return {
+            "status": "partial",
+            "label": "INCOMPLETE",
+            "ready": False,
+            "checks": checks,
+        }
+    return {
+        "status": "empty",
+        "label": "NO RUN YET",
+        "ready": False,
+        "checks": checks,
+    }
+
+
+def _has_support_story_evidence(
+    state: dict[str, Any],
+    checks: dict[str, bool],
+) -> bool:
+    return any(
+        [
+            state.get("available"),
+            state.get("red_summary"),
+            state.get("green_summary"),
+            state.get("remediation"),
+            state.get("attack_pack"),
+            any(checks.values()),
+        ]
+    )
+
+
+def _green_failed_zero(proof: dict[str, Any]) -> bool:
+    value = proof.get("green_failed", 1)
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value == 0
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip()) == 0
+    return False
 
 
 def onboarding_level_notice(level: int, uses_guarded_gateway: bool = False) -> dict[str, str]:
@@ -847,6 +1346,36 @@ def _summary_status(summary: dict[str, Any], *, expected_failure: bool = False) 
     if expected_failure:
         return f"{failed} findings" if failed else "no findings"
     return "PASS" if failed == 0 and passed else "FAIL"
+
+
+def _summary_counts(summary: dict[str, Any] | None) -> str:
+    if not summary:
+        return "-"
+    failed = int(summary.get("failed", 0) or 0)
+    passed = int(summary.get("passed", 0) or 0)
+    return f"{failed} failed, {passed} passed"
+
+
+def _attack_status_label(summary: dict[str, Any] | None, attack_id: str) -> str:
+    attack = _attack_by_id(summary, attack_id)
+    if attack and attack.get("status"):
+        return str(attack["status"])
+    return "-"
+
+
+def _attack_assertion_count(attack_pack: Any, attack_id: str) -> int:
+    if not isinstance(attack_pack, list):
+        return 0
+    for attack in attack_pack:
+        if not isinstance(attack, dict) or attack.get("id") != attack_id:
+            continue
+        assertions = attack.get("assertions", [])
+        return len(assertions) if isinstance(assertions, list) else 0
+    return 0
+
+
+def _yes_no(value: Any) -> str:
+    return "yes" if bool(value) else "no"
 
 
 def _render_proof_rows(proof: dict[str, Any]) -> None:
