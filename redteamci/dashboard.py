@@ -1075,50 +1075,65 @@ def _render_presenter_green_proof_panel(
 
 
 def _render_classic_presenter_mode() -> None:
-    state = load_support_story_dashboard_state(ROOT)
-    readiness = demo_readiness_status(state)
-
-    _render_classic_presenter_header(state, readiness)
+    _render_classic_presenter_header()
     uploaded_state = _render_uploaded_agent_intake()
     if not uploaded_state.get("available"):
         st.info("Upload an agent to populate the profile, generated attacks, and proof panels.")
         return
-    _render_classic_presenter_actions()
+    _render_uploaded_agent_actions(uploaded_state)
     _render_classic_presenter_stepper()
 
     profile_col, attacks_col, red_col = st.columns([1.1, 1.3, 1.2])
     with profile_col:
-        _render_classic_agent_profile_panel()
+        _render_uploaded_agent_profile_panel(uploaded_state)
     with attacks_col:
-        _render_classic_generated_attacks_panel(state)
+        _render_uploaded_agent_generated_attacks_panel(uploaded_state)
     with red_col:
-        _render_classic_red_gate_panel(state)
+        _render_uploaded_agent_red_gate_panel(uploaded_state)
 
-    _render_classic_trace_replay_panel(state)
+    _render_uploaded_agent_trace_replay_panel(uploaded_state)
 
     sentry_col, claude_col = st.columns([1.0, 1.6])
     with sentry_col:
-        _render_classic_sentry_incident_panel(state)
+        _render_uploaded_agent_sentry_incident_panel(uploaded_state)
     with claude_col:
-        _render_classic_claude_remediation_panel(ROOT, state)
+        _render_uploaded_agent_remediation_panel(uploaded_state)
 
-    _render_classic_green_proof_panel(state, readiness)
+    _render_uploaded_agent_green_proof_panel(uploaded_state)
 
 
-def _render_classic_presenter_header(
-    state: dict[str, Any],
-    readiness: dict[str, Any],
-) -> None:
+def _render_classic_presenter_header() -> None:
     st.title("RedTeamCI")
     st.subheader("Claude Code for AI-agent security gates")
     st.caption("pytest for AI-agent security")
 
     github_connected = github_available()[0]
-    sentry_context = build_sentry_dashboard_context(state)
+    uploaded_state = (
+        load_uploaded_agent_state(ROOT)
+        if st.session_state.get("uploaded_agent_active")
+        else {"available": False}
+    )
+    uploaded_agent = uploaded_state.get("agent", {}) if uploaded_state.get("available") else {}
+    uploaded_proof = (
+        uploaded_state.get("proof_level", {}) if uploaded_state.get("available") else {}
+    )
+    red_summary = uploaded_state.get("red_summary") if uploaded_state.get("available") else None
     status_cols = st.columns([1.35, 1.0, 1.2])
-    _render_presenter_status_value(status_cols[0], "Scenario", "Customer Support Agent")
-    _render_presenter_status_value(status_cols[1], "Proof", readiness["label"])
-    _render_presenter_status_value(status_cols[2], "Release gate", "Local proof active")
+    _render_presenter_status_value(
+        status_cols[0],
+        "Agent",
+        str(uploaded_agent.get("name") or "Waiting for upload"),
+    )
+    _render_presenter_status_value(
+        status_cols[1],
+        "Proof",
+        _summary_counts(red_summary) if isinstance(red_summary, dict) and red_summary else "-",
+    )
+    _render_presenter_status_value(
+        status_cols[2],
+        "Proof level",
+        str(uploaded_proof.get("label") or "No uploaded agent"),
+    )
     integration_cols = st.columns(2)
     _render_presenter_status_value(
         integration_cols[0],
@@ -1128,21 +1143,15 @@ def _render_classic_presenter_header(
     _render_presenter_status_value(
         integration_cols[1],
         "Sentry",
-        "optional, configured" if sentry_context["configured"] else "optional, not configured",
+        "optional, configured" if os.environ.get("SENTRY_DSN") else "optional, not configured",
     )
 
-    if readiness["status"] == "ready":
-        st.success(
-            "DEMO READY: red exploit, remediation artifact, generated regression, "
-            "and green proof are complete."
-        )
-    elif readiness["status"] == "partial":
-        st.warning(
-            "INCOMPLETE: proof artifacts exist, but the full certification chain "
-            "is not complete yet."
-        )
+    if isinstance(red_summary, dict) and red_summary:
+        st.success("UPLOADED AGENT PROOF LOADED: generated checks and traces are active.")
+    elif uploaded_state.get("available"):
+        st.info("UPLOADED AGENT STAGED: run the uploaded-agent red check to create proof.")
     else:
-        st.info("NO RUN YET: generate demo proof to create the local certification chain.")
+        st.info("Upload an agent or load the latest uploaded proof to populate this dashboard.")
 
 
 def _render_uploaded_agent_intake() -> dict[str, Any]:
@@ -1286,6 +1295,231 @@ def _render_uploaded_agent_state(state: dict[str, Any]) -> None:
         summary_path = state.get("submission", {}).get("summary_path")
         if summary_path:
             run_cols[2].caption(f"Summary: {_display_path(Path(summary_path), ROOT)}")
+
+
+def _render_uploaded_agent_actions(state: dict[str, Any]) -> None:
+    top_cols = st.columns(3)
+    if top_cols[0].button(
+        "Load Latest Proof",
+        key="uploaded_presenter_load",
+        use_container_width=True,
+    ):
+        if load_uploaded_agent_state(ROOT).get("available"):
+            st.session_state["uploaded_agent_active"] = True
+        st.rerun()
+    if state.get("runnable"):
+        if top_cols[1].button(
+            "Run Uploaded Agent Red Check",
+            key="uploaded_presenter_run_red",
+            use_container_width=True,
+        ):
+            try:
+                args = uploaded_agent_run_args(state)
+            except UploadedAgentError as exc:
+                st.error(str(exc))
+            else:
+                with st.expander("Uploaded agent red-check output", expanded=True):
+                    st.caption("Runs only the generated checks for this uploaded agent.")
+                    run_cli(args)
+                    st.info("Click Load Latest Proof to refresh uploaded-agent panels.")
+    else:
+        top_cols[1].caption("Plan-only upload: no runnable command or endpoint detected.")
+    top_cols[2].caption("Generated attacks are scoped to the uploaded agent profile.")
+
+
+def _render_uploaded_agent_profile_panel(state: dict[str, Any]) -> None:
+    agent = state.get("agent", {})
+    proof = state.get("proof_level", {})
+    with st.container(border=True):
+        st.subheader("Agent Profile")
+        st.metric("Agent", str(agent.get("name", "Uploaded agent")))
+        st.caption(str(proof.get("label", "No proof level")))
+        st.write("Adapter")
+        st.write(f"`{agent.get('adapter_kind', 'unknown')}`")
+        st.write("Detected capabilities")
+        enabled = [
+            str(row.get("name"))
+            for row in state.get("capabilities", [])
+            if isinstance(row, dict) and row.get("enabled")
+        ]
+        st.write(" ".join(f"`{capability}`" for capability in enabled) or "-")
+        if state.get("risk_areas"):
+            st.write("Risk areas")
+            st.write(" ".join(f"`{risk}`" for risk in state["risk_areas"]))
+
+
+def _render_uploaded_agent_generated_attacks_panel(state: dict[str, Any]) -> None:
+    attack_pack = state.get("attack_pack", [])
+    red_summary = state.get("red_summary")
+    with st.container(border=True):
+        st.subheader("Generated Attacks")
+        st.caption("Generated from the uploaded agent's declared tools and resources.")
+        if not attack_pack:
+            st.caption("No generated attacks yet.")
+            return
+        for attack in attack_pack:
+            if not isinstance(attack, dict):
+                continue
+            attack_id = str(attack.get("id", "-"))
+            status = _attack_status_label(red_summary, attack_id)
+            assertion_count = _attack_assertion_count(attack_pack, attack_id)
+            st.write(f"**{attack_id} - {attack.get('name', '-')}**")
+            st.caption(
+                f"source: uploaded profile | assertions: {assertion_count or '-'} | "
+                f"red: {status}"
+            )
+        with st.expander("Show raw uploaded attack pack"):
+            st.json(attack_pack)
+
+
+def _render_uploaded_agent_red_gate_panel(state: dict[str, Any]) -> None:
+    red_summary = state.get("red_summary") or {}
+    with st.container(border=True):
+        st.subheader("Red Gate")
+        st.caption("Release gate: uploaded-agent local red check")
+        st.metric("Uploaded red gate", _summary_counts(red_summary))
+        if not red_summary:
+            st.caption("Run Uploaded Agent Red Check to create a real gate result.")
+            return
+        failed = [
+            attack
+            for attack in red_summary.get("attacks", [])
+            if isinstance(attack, dict) and attack.get("status") == "FAIL"
+        ]
+        if failed:
+            for attack in failed[:3]:
+                st.error(f"{attack.get('id', '-')} - FAIL")
+        else:
+            st.success("No generated uploaded-agent findings.")
+        st.caption("CI result is based on this uploaded agent's structured run summary.")
+
+
+def _render_uploaded_agent_trace_replay_panel(state: dict[str, Any]) -> None:
+    attack_id = _uploaded_trace_attack_id(state)
+    trace = _load_uploaded_agent_trace(state, attack_id) if attack_id else None
+    with st.container(border=True):
+        st.subheader("Trace Replay")
+        if not attack_id:
+            st.caption("No uploaded generated attacks are available.")
+            return
+        st.caption(f"Latest uploaded-agent trace for `{attack_id}`.")
+        if not trace:
+            st.caption("No trace yet. Run Uploaded Agent Red Check first.")
+            return
+        events = trace.get("events", []) if isinstance(trace, dict) else []
+        interesting = [
+            event
+            for event in events
+            if isinstance(event, dict)
+            and str(event.get("type", "")).startswith(("tool_call", "assertion_", "outcome"))
+        ]
+        for event in interesting[:8]:
+            st.code(_uploaded_trace_event_line(event))
+        with st.expander("Show uploaded trace JSON"):
+            st.json(trace)
+
+
+def _render_uploaded_agent_sentry_incident_panel(state: dict[str, Any]) -> None:
+    summary = state.get("red_summary") or {}
+    integrations = summary.get("integrations", {}) if isinstance(summary, dict) else {}
+    if not isinstance(integrations, dict):
+        integrations = {}
+    event_ids = integrations.get("sentry_event_ids", [])
+    if not isinstance(event_ids, list):
+        event_ids = []
+    with st.container(border=True):
+        st.subheader("Sentry Incident")
+        if os.environ.get("SENTRY_DSN"):
+            st.success("Sentry: configured")
+        else:
+            st.caption("Sentry: optional, not configured")
+        if event_ids:
+            st.write("Uploaded-agent event IDs")
+            for event_id in event_ids:
+                st.code(str(event_id))
+        else:
+            st.caption("No uploaded-agent Sentry events recorded for the latest red check.")
+        with st.expander("Raw uploaded integrations"):
+            st.json(integrations)
+
+
+def _render_uploaded_agent_remediation_panel(state: dict[str, Any]) -> None:
+    with st.container(border=True):
+        st.subheader("Claude Remediation")
+        st.caption("No uploaded-agent remediation artifact has been generated yet.")
+        st.caption("Current generic upload flow supports generated red checks and traces.")
+        red_summary = state.get("red_summary")
+        if isinstance(red_summary, dict) and red_summary.get("failed"):
+            st.warning("Findings exist; remediation can be generated from uploaded traces next.")
+        else:
+            st.caption("Run the uploaded-agent red check to create remediation input traces.")
+
+
+def _render_uploaded_agent_green_proof_panel(state: dict[str, Any]) -> None:
+    red_summary = state.get("red_summary")
+    with st.container(border=True):
+        st.subheader("Green Proof")
+        st.metric("Uploaded green gate", "-")
+        st.caption("No uploaded-agent green proof has been generated yet.")
+        if isinstance(red_summary, dict) and red_summary:
+            st.caption("Latest uploaded red gate: " + _summary_counts(red_summary))
+        else:
+            st.caption("Run the uploaded-agent red check before remediation or green proof.")
+
+
+def _uploaded_trace_attack_id(state: dict[str, Any]) -> str:
+    summary = state.get("red_summary")
+    if isinstance(summary, dict):
+        for attack in summary.get("attacks", []):
+            if isinstance(attack, dict) and attack.get("status") == "FAIL":
+                return str(attack.get("id", ""))
+        for attack in summary.get("attacks", []):
+            if isinstance(attack, dict) and attack.get("id"):
+                return str(attack.get("id"))
+    attack_ids = state.get("attack_ids")
+    if isinstance(attack_ids, list) and attack_ids:
+        return str(attack_ids[0])
+    return ""
+
+
+def _load_uploaded_agent_trace(
+    state: dict[str, Any],
+    attack_id: str,
+) -> dict[str, Any] | None:
+    submission = state.get("submission")
+    if not isinstance(submission, dict) or not attack_id:
+        return None
+    traces_root = submission.get("traces_root")
+    if not isinstance(traces_root, str):
+        return None
+    root = Path(traces_root)
+    if not root.exists():
+        return None
+    run_dirs = sorted(
+        [path for path in root.glob("run_*") if path.is_dir()],
+        key=lambda path: path.stat().st_mtime,
+    )
+    for run_dir in reversed(run_dirs):
+        trace = _load_json(run_dir / f"{attack_id}.json")
+        if isinstance(trace, dict):
+            return trace
+    return None
+
+
+def _uploaded_trace_event_line(event: dict[str, Any]) -> str:
+    event_type = str(event.get("type", "event"))
+    tool = event.get("tool")
+    assertion = event.get("assertion")
+    reason = event.get("reason")
+    if tool:
+        args = event.get("args", {})
+        if isinstance(args, dict) and args:
+            return f"{event_type} {tool} args={json.dumps(args, sort_keys=True)}"
+        return f"{event_type} {tool}"
+    if isinstance(assertion, dict):
+        assertion_type = assertion.get("type", "assertion")
+        return f"{event_type} {assertion_type}: {reason or '-'}"
+    return f"{event_type}: {reason or event.get('title', '-')}"
 
 
 def _render_classic_presenter_actions() -> None:
