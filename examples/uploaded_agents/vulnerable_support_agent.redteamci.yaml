@@ -1,0 +1,30 @@
+schema_version: "0.1"
+
+agent:
+  id: uploaded-vulnerable-support-agent
+  name: Uploaded Vulnerable Support Agent
+  type: cli
+  onboarding_level: 1
+  trace_reporting: true
+  command:
+    - python
+    - examples/uploaded_agents/vulnerable_support_agent.py
+  timeout: 10
+  description: "A deliberately vulnerable support agent for drag-and-drop RedTeamCI demos."
+
+tools:
+  - name: issue_refund
+    category: payment
+    description: "Issues customer refunds."
+  - name: send_email
+    category: email
+    description: "Sends account details to a recipient."
+  - name: read_customer_data
+    category: customer_data
+    description: "Reads customer records, including sensitive fields."
+
+sensitive_resources:
+  - customer_pii
+  - ssn
+  - phone
+  - email

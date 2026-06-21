@@ -38,6 +38,12 @@ from redteamci.github_actions import (
     workflow_run_url,
 )
 from redteamci.summary import load_summary
+from redteamci.uploads import (
+    UploadedAgentError,
+    ingest_uploaded_agent,
+    load_uploaded_agent_state,
+    uploaded_agent_run_args,
+)
 
 
 REDTEAMCI_OUTPUT_DIR = ".redteamci"
@@ -49,6 +55,9 @@ LEVEL_1_WARNING = (
     "Level 1 trace/report/proposal only; no forced blocking unless the agent uses guarded tools."
 )
 SUPPORT_STORY_RELATIVE_ROOT = Path(".demo") / "support-story"
+SAMPLE_UPLOADED_AGENT_MANIFEST = (
+    ROOT / "examples" / "uploaded_agents" / "vulnerable_support_agent.redteamci.yaml"
+)
 SUPPORT_STORY_ATTACKS = [
     "generated-refund-001",
     "generated-email-001",
@@ -1069,6 +1078,7 @@ def _render_classic_presenter_mode() -> None:
     readiness = demo_readiness_status(state)
 
     _render_classic_presenter_header(state, readiness)
+    _render_uploaded_agent_intake()
     _render_classic_presenter_actions()
     _render_classic_presenter_stepper()
 
@@ -1129,6 +1139,120 @@ def _render_classic_presenter_header(
         )
     else:
         st.info("NO RUN YET: generate demo proof to create the local certification chain.")
+
+
+def _render_uploaded_agent_intake() -> None:
+    state = load_uploaded_agent_state(ROOT)
+    with st.container(border=True):
+        st.subheader("Agent Intake")
+        st.caption("Drop an agent manifest, zip bundle, OpenAPI JSON, trace, or source file.")
+        uploaded = st.file_uploader(
+            "Drag and drop agent artifact",
+            type=["yaml", "yml", "json", "zip", "py", "js", "mjs", "har", "jsonl", "txt"],
+            accept_multiple_files=False,
+            key="uploaded_agent_artifact",
+        )
+        action_cols = st.columns([1, 1.2, 1.2])
+        if uploaded is not None:
+            try:
+                state = ingest_uploaded_agent(uploaded.name, uploaded.getvalue(), root=ROOT)
+                st.success(f"Loaded uploaded agent: {state['agent']['name']}")
+            except UploadedAgentError as exc:
+                st.error(str(exc))
+                state = load_uploaded_agent_state(ROOT)
+        if action_cols[0].button(
+            "Load Example Vulnerable Agent",
+            key="load_example_uploaded_agent",
+            use_container_width=True,
+        ):
+            if SAMPLE_UPLOADED_AGENT_MANIFEST.exists():
+                try:
+                    state = ingest_uploaded_agent(
+                        SAMPLE_UPLOADED_AGENT_MANIFEST.name,
+                        SAMPLE_UPLOADED_AGENT_MANIFEST.read_bytes(),
+                        root=ROOT,
+                    )
+                    st.success("Loaded the example vulnerable support agent.")
+                except UploadedAgentError as exc:
+                    st.error(str(exc))
+            else:
+                st.error("Example uploaded-agent manifest is missing.")
+        _render_uploaded_agent_state(state)
+
+
+def _render_uploaded_agent_state(state: dict[str, Any]) -> None:
+    if not state.get("available"):
+        st.info("No uploaded agent staged yet. Upload a manifest or use the example agent.")
+        return
+
+    agent = state.get("agent", {})
+    proof_level = state.get("proof_level", {})
+    attack_pack = state.get("attack_pack", [])
+    fields = st.columns([1.2, 1, 1.2, 1])
+    _render_presenter_status_value(fields[0], "Uploaded agent", str(agent.get("name", "agent")))
+    _render_presenter_status_value(fields[1], "Adapter", str(agent.get("adapter_kind", "unknown")))
+    _render_presenter_status_value(fields[2], "Proof level", str(proof_level.get("label", "-")))
+    _render_presenter_status_value(fields[3], "Generated tests", str(len(attack_pack)))
+
+    message = str(proof_level.get("message", ""))
+    if proof_level.get("tone") == "success":
+        st.success(message)
+    elif proof_level.get("tone") == "warning":
+        st.warning(message)
+    else:
+        st.info(message)
+
+    detail_cols = st.columns(2)
+    with detail_cols[0]:
+        st.write("Detected tools")
+        tools = state.get("tools", [])
+        if tools:
+            for tool in tools:
+                if isinstance(tool, dict):
+                    st.caption(
+                        f"{tool.get('name', 'tool')} | {tool.get('category', 'tool')}"
+                    )
+        else:
+            st.caption("No tools declared; generated plan is limited.")
+    with detail_cols[1]:
+        st.write("Generated attacks")
+        if attack_pack:
+            for attack in attack_pack[:8]:
+                if isinstance(attack, dict):
+                    st.caption(f"{attack.get('id', '-')} | {attack.get('name', '-')}")
+        else:
+            st.caption("No generated attacks yet.")
+
+    run_cols = st.columns([1.1, 1.2, 1.2])
+    if state.get("runnable"):
+        if run_cols[0].button(
+            "Run Uploaded Agent Red Check",
+            key="run_uploaded_agent_red_check",
+            use_container_width=True,
+        ):
+            try:
+                args = uploaded_agent_run_args(state)
+            except UploadedAgentError as exc:
+                st.error(str(exc))
+            else:
+                with st.expander("Uploaded agent red-check output", expanded=True):
+                    st.caption(
+                        "A nonzero exit is expected when the uploaded agent has real findings."
+                    )
+                    run_cli(args)
+                    st.info(
+                        "Generated traces and summary are stored under "
+                        ".redteamci/uploaded-agent."
+                    )
+    else:
+        run_cols[0].caption("Plan-only upload: no runnable command or endpoint was detected.")
+
+    red_summary = state.get("red_summary")
+    if isinstance(red_summary, dict) and red_summary:
+        run_cols[1].metric("Last uploaded red check", _summary_counts(red_summary))
+        summary_path = state.get("submission", {}).get("summary_path")
+        if summary_path:
+            run_cols[2].caption(f"Summary: {_display_path(Path(summary_path), ROOT)}")
 
 
 def _render_classic_presenter_actions() -> None:
@@ -2684,6 +2808,11 @@ def run_cli(args: list[str]) -> None:
         st.code(result.stdout)
     if result.stderr:
         st.error(result.stderr)
+    if result.returncode:
+        st.warning(
+            f"Command exited with status {result.returncode}. "
+            "For red checks, this usually means findings were detected."
+        )
 
 
 def _load_optional_summary(path: Path) -> dict[str, Any] | None:
