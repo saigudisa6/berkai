@@ -140,8 +140,23 @@ def _render_patch_panel(column: Any) -> None:
             return
         st.caption(f"Remediation source: {summary.get('source', 'unknown')}")
         st.caption(f"Success: {summary.get('success', 'unknown')}")
+        if summary.get("source") == "claude_code_proposal":
+            st.info("Claude Code generated the remediation plan. RedTeamCI validated and applied it deterministically.")
+        st.caption(
+            "Live Claude proposal applied: "
+            + ("yes" if summary.get("live_claude_proposal_applied") else "no")
+        )
+        st.caption(
+            "Fixture fallback used: "
+            + ("yes" if summary.get("fixture_fallback_used") else "no")
+        )
+        artifact_path = summary.get("claude_artifact_path") or summary.get("prompt_path")
+        if artifact_path:
+            st.caption(f"Claude artifact path: {artifact_path}")
         if summary.get("error"):
             st.warning(summary["error"])
+        if summary.get("validation_error_path"):
+            st.warning(f"Claude validation errors: {summary['validation_error_path']}")
         st.write("Changed files:")
         for path in summary.get("changed_files", []):
             st.write(f"- {path}")

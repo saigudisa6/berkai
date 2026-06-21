@@ -53,7 +53,7 @@ Expected before patch:
 Expected after patch:
 
 ```text
-0 failed, 4 passed
+0 failed, 5 passed
 AGENT CERTIFIED
 ```
 
@@ -160,18 +160,21 @@ deterministic replay:
 python -m redteamci.cli fix pi-003 --use-fixture --apply
 ```
 
-The live Claude Code integration is inspectable and uses the same contract:
-failed trace, guardrail patch, generated regression, and stored artifacts.
+The live Claude Code integration is inspectable and uses the same contract.
+By default Claude Code generates a structured remediation proposal, then
+RedTeamCI validates and applies it deterministically.
 
 ```bash
 python -m redteamci.cli claude status
-python -m redteamci.cli claude prompt pi-003 --run-id run_001
-python -m redteamci.cli claude remediate pi-003 --apply
+python -m redteamci.cli claude prompt pi-003 --run-id run_001 --mode proposal
+python -m redteamci.cli claude remediate pi-003 --apply --mode proposal
 ```
 
 Claude artifacts are written under `patches/`, including the prompt, raw
-Claude output, summary JSON, and diff. Use `--no-fixture-fallback` for strict
-live mode, or rely on the default fixture fallback for demo reliability.
+Claude output, parsed proposal JSON, validation errors, summary JSON, and diff.
+Use `--no-fixture-fallback` for strict live mode, or rely on the default fixture
+fallback for demo reliability. Direct repo editing is available only as an
+experimental mode with `--mode direct-edit`.
 
 ## What It Ships
 

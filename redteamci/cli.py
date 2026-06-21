@@ -12,6 +12,7 @@ from .adapters import DEFAULT_HTTP_DEMO_URL, AgentConfig, check_http_agent
 from .claude_code import (
     ClaudeCodeRemediator,
     build_claude_prompt,
+    build_claude_proposal_prompt,
     write_claude_prompt_artifact,
 )
 from .config import load_manifest
@@ -96,6 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("--use-fixture", action="store_true")
     fix.add_argument("--apply", action="store_true")
     fix.add_argument("--dry-run", action="store_true")
+    fix.add_argument("--mode", choices=["proposal", "direct-edit"], default="proposal")
     fix.add_argument("--max-turns", type=int, default=12)
     fix.add_argument("--timeout", type=int, default=300)
     fix.add_argument("--no-fixture-fallback", action="store_true")
@@ -111,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     claude_prompt.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
     claude_prompt.add_argument("--traces-root", default=str(TRACES_ROOT))
     claude_prompt.add_argument("--run-id")
+    claude_prompt.add_argument("--mode", choices=["proposal", "direct-edit"], default="proposal")
 
     claude_remediate = claude_sub.add_parser("remediate")
     claude_remediate.add_argument("attack_id")
@@ -118,6 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     claude_remediate.add_argument("--traces-root", default=str(TRACES_ROOT))
     claude_remediate.add_argument("--run-id")
     claude_remediate.add_argument("--apply", action="store_true")
+    claude_remediate.add_argument("--mode", choices=["proposal", "direct-edit"], default="proposal")
     claude_remediate.add_argument("--max-turns", type=int, default=12)
     claude_remediate.add_argument("--timeout", type=int, default=300)
     claude_remediate.add_argument("--no-fixture-fallback", action="store_true")
@@ -212,6 +216,7 @@ def fix_command(args: argparse.Namespace) -> int:
         allow_fixture_fallback=not args.no_fixture_fallback,
         max_turns=args.max_turns,
         timeout=args.timeout,
+        mode=args.mode,
     )
 
     if args.json:
@@ -228,6 +233,8 @@ def fix_command(args: argparse.Namespace) -> int:
                     "error": result.error,
                     "prompt_path": result.prompt_path,
                     "raw_output_path": result.raw_output_path,
+                    "proposal_path": result.proposal_path,
+                    "validation_error_path": result.validation_error_path,
                     "fixture_fallback_used": result.fixture_fallback_used,
                 },
                 indent=2,
@@ -245,8 +252,13 @@ def fix_command(args: argparse.Namespace) -> int:
         print(f"Claude prompt: {result.prompt_path}")
     if result.raw_output_path:
         print(f"Claude raw output: {result.raw_output_path}")
-    if result.fixture_fallback_used:
-        print("Fixture fallback used: True")
+    if result.proposal_path:
+        print(f"Claude proposal: {result.proposal_path}")
+    if result.validation_error_path:
+        print(f"Claude validation errors: {result.validation_error_path}")
+    if result.source == "claude_code_proposal":
+        print(f"Live Claude proposal applied: {result.success and apply}")
+    print(f"Fixture fallback used: {result.fixture_fallback_used}")
     print()
     print("Patch:")
     print(result.patch_diff.rstrip() or "No guardrail changes needed.")
@@ -274,19 +286,29 @@ def claude_command(args: argparse.Namespace) -> int:
         )
         trace_path = Path(trace["trace_path"])
         run_id = str(trace.get("run_id", "run_unknown"))
-        summary_path = PATCHES_ROOT / f"{run_id}_{args.attack_id}_claude_summary.json"
-        prompt = build_claude_prompt(
-            attack_id=args.attack_id,
-            trace=trace,
-            guardrails_yaml=Path(args.guardrails).read_text(encoding="utf-8"),
-            run_id=run_id,
-            summary_path=summary_path,
-            trace_path=trace_path,
-        )
+        if args.mode == "direct-edit":
+            summary_path = PATCHES_ROOT / f"{run_id}_{args.attack_id}_claude_direct_edit_summary.json"
+            prompt = build_claude_prompt(
+                attack_id=args.attack_id,
+                trace=trace,
+                guardrails_yaml=Path(args.guardrails).read_text(encoding="utf-8"),
+                run_id=run_id,
+                summary_path=summary_path,
+                trace_path=trace_path,
+            )
+        else:
+            prompt = build_claude_proposal_prompt(
+                attack_id=args.attack_id,
+                trace=trace,
+                guardrails_yaml=Path(args.guardrails).read_text(encoding="utf-8"),
+                run_id=run_id,
+                trace_path=trace_path,
+            )
         prompt_path = write_claude_prompt_artifact(
             attack_id=args.attack_id,
             run_id=run_id,
             prompt=prompt,
+            mode=args.mode,
         )
         print(f"Wrote Claude prompt: {prompt_path}")
         return 0
@@ -305,6 +327,7 @@ def claude_command(args: argparse.Namespace) -> int:
             allow_fixture_fallback=not args.no_fixture_fallback,
             max_turns=args.max_turns,
             timeout=args.timeout,
+            mode=args.mode,
         )
         if args.json:
             print(
@@ -316,6 +339,8 @@ def claude_command(args: argparse.Namespace) -> int:
                         "summary_path": result.summary_path,
                         "prompt_path": result.prompt_path,
                         "raw_output_path": result.raw_output_path,
+                        "proposal_path": result.proposal_path,
+                        "validation_error_path": result.validation_error_path,
                         "fixture_fallback_used": result.fixture_fallback_used,
                         "error": result.error,
                     },
@@ -331,8 +356,13 @@ def claude_command(args: argparse.Namespace) -> int:
                 print(f"Claude prompt: {result.prompt_path}")
             if result.raw_output_path:
                 print(f"Claude raw output: {result.raw_output_path}")
-            if result.fixture_fallback_used:
-                print("Fixture fallback used: True")
+            if result.proposal_path:
+                print(f"Claude proposal: {result.proposal_path}")
+            if result.validation_error_path:
+                print(f"Claude validation errors: {result.validation_error_path}")
+            if result.source == "claude_code_proposal":
+                print(f"Live Claude proposal applied: {result.success and args.apply}")
+            print(f"Fixture fallback used: {result.fixture_fallback_used}")
             if result.error:
                 print(f"Error: {result.error}")
         return 0 if result.success else 1

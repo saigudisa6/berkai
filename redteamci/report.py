@@ -100,6 +100,14 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
             "## Claude Code Remediation",
             f"Source: {patch_summary.get('source', 'unknown')}",
             f"Success: {patch_summary.get('success', 'unknown')}",
+            _remediation_description(patch_summary),
+            "RedTeamCI validated and applied it deterministically."
+            if patch_summary.get("source") == "claude_code_proposal"
+            and patch_summary.get("success")
+            else "",
+            f"Live Claude proposal applied: {_yes_no(patch_summary.get('live_claude_proposal_applied'))}",
+            f"Fixture fallback used: {_yes_no(patch_summary.get('fixture_fallback_used'))}",
+            f"Claude artifact path: {patch_summary.get('claude_artifact_path') or patch_summary.get('prompt_path') or '-'}",
             f"Regression test path: {patch_summary.get('regression_test_path')}",
             f"Failure reason: {patch_summary.get('error')}",
             "",
@@ -221,3 +229,18 @@ def _integration_lines(integrations: dict[str, Any]) -> list[str]:
     if redis_summary:
         lines.append(f"Redis summary key: {redis_summary}")
     return lines
+
+
+def _yes_no(value: Any) -> str:
+    return "yes" if bool(value) else "no"
+
+
+def _remediation_description(summary: dict[str, Any]) -> str:
+    source = summary.get("source")
+    if source == "claude_code_proposal":
+        return "Claude Code generated the remediation plan."
+    if source == "fixture":
+        return "Remediation used a stored deterministic artifact."
+    if source == "claude_code_direct_edit":
+        return "Claude Code direct-edit mode was used."
+    return "No remediation artifact found."
