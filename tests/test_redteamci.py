@@ -321,8 +321,12 @@ class RedTeamCITest(unittest.TestCase):
 
     def test_init_writes_builtin_and_http_manifests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            builtin = Path(tmp) / "builtin.yml"
-            http = Path(tmp) / "http.yml"
+            tmp_path = Path(tmp)
+            default_manifest = tmp_path / "redteamci.yml"
+            builtin = tmp_path / "builtin.yml"
+            http = tmp_path / "http.yml"
+            self.assertEqual(capture_main_in_cwd(["init"], tmp_path)[0], 0)
+            self.assertIn("agent: builtin", default_manifest.read_text(encoding="utf-8"))
             self.assertEqual(quiet_main(["init", "--config", str(builtin), "--agent", "builtin"]), 0)
             self.assertIn("agent: builtin", builtin.read_text(encoding="utf-8"))
             self.assertEqual(
@@ -333,6 +337,95 @@ class RedTeamCITest(unittest.TestCase):
             self.assertIn("agent: http", http_text)
             self.assertIn("agent_url: http://127.0.0.1:8765/run", http_text)
             self.assertEqual(quiet_main(["init", "--config", str(http), "--agent", "http"]), 1)
+
+    def test_init_github_workflow_writes_manifest_and_workflow_in_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            manifest = tmp_path / "config" / "redteamci.yml"
+            code, stdout = capture_main_in_cwd(
+                [
+                    "init",
+                    "--config",
+                    str(manifest),
+                    "--agent",
+                    "http",
+                    "--agent-url",
+                    "http://127.0.0.1:8765/run",
+                    "--github-workflow",
+                ],
+                tmp_path,
+            )
+
+            self.assertEqual(code, 0)
+            self.assertIn(f"Wrote {manifest}", stdout)
+            self.assertTrue(manifest.exists())
+            self.assertIn("agent: http", manifest.read_text(encoding="utf-8"))
+            workflow = tmp_path / ".github" / "workflows" / "redteamci-agent-security.yml"
+            self.assertTrue(workflow.exists())
+            self.assertFalse(
+                (
+                    manifest.parent
+                    / ".github"
+                    / "workflows"
+                    / "redteamci-agent-security.yml"
+                ).exists()
+            )
+            workflow_text = workflow.read_text(encoding="utf-8")
+            self.assertIn("pull_request:", workflow_text)
+            self.assertIn("push:", workflow_text)
+            self.assertIn("workflow_dispatch:", workflow_text)
+            self.assertIn(
+                "python -m pip install git+https://github.com/saigudisa6/berkai.git",
+                workflow_text,
+            )
+            self.assertIn(
+                "python -m redteamci.cli doctor --config config/redteamci.yml",
+                workflow_text,
+            )
+            self.assertIn(
+                "python -m redteamci.cli gate --config config/redteamci.yml --github-annotations",
+                workflow_text,
+            )
+            self.assertIn("actions/upload-artifact@v4", workflow_text)
+            self.assertIn("if: always()", workflow_text)
+            for artifact in [
+                "before.json",
+                "before.junit.xml",
+                "before.sarif",
+                "traces/",
+                "regressions/generated_attacks.json",
+            ]:
+                self.assertIn(artifact, workflow_text)
+
+    def test_init_github_workflow_refuses_overwrite_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            workflow = tmp_path / ".github" / "workflows" / "redteamci-agent-security.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("custom workflow\n", encoding="utf-8")
+
+            code, stdout = capture_main_in_cwd(["init", "--github-workflow"], tmp_path)
+
+            self.assertEqual(code, 1)
+            self.assertIn("already exists. Use --force to overwrite.", stdout)
+            self.assertEqual(workflow.read_text(encoding="utf-8"), "custom workflow\n")
+
+    def test_init_github_workflow_overwrites_with_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            workflow = tmp_path / ".github" / "workflows" / "redteamci-agent-security.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("custom workflow\n", encoding="utf-8")
+
+            code, stdout = capture_main_in_cwd(["init", "--github-workflow", "--force"], tmp_path)
+
+            self.assertEqual(code, 0)
+            self.assertIn(f"Wrote {workflow}", stdout)
+            self.assertNotEqual(workflow.read_text(encoding="utf-8"), "custom workflow\n")
+            self.assertIn(
+                "python -m redteamci.cli gate --config redteamci.yml --github-annotations",
+                workflow.read_text(encoding="utf-8"),
+            )
 
     def test_doctor_passes_builtin_and_fails_missing_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

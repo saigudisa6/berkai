@@ -104,6 +104,8 @@ python -m redteamci.cli gate --github-annotations
 `gate` writes `before.json`, `before.junit.xml`, and `before.sarif` by default,
 exits nonzero for failed attacks, and can emit one secret-redacted workflow
 annotation per failed attack. It does not require extra GitHub permissions.
+To scaffold a drop-in GitHub Actions gate for your repo, pass
+`--github-workflow` to `init` and commit the generated manifest plus workflow.
 
 Replay a saved flight-recorder trace in CI or demo terminals:
 
@@ -154,8 +156,15 @@ Tool events are optional, but they give RedTeamCI stronger trace evidence.
 Create a manifest:
 
 ```bash
-python -m redteamci.cli init --agent http --agent-url http://127.0.0.1:8765/run
+python -m redteamci.cli init --agent http --agent-url http://127.0.0.1:8765/run --github-workflow
 ```
+
+Commit `redteamci.yml` and
+`.github/workflows/redteamci-agent-security.yml`. The workflow runs
+RedTeamCI from this GitHub repo, then runs `doctor --config redteamci.yml` and
+`gate --config redteamci.yml --github-annotations` on pull requests, pushes,
+and manual dispatches, then uploads RedTeamCI artifacts even when the gate
+fails.
 
 Validate it:
 

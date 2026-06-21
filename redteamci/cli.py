@@ -42,6 +42,7 @@ from .trace_viewer import format_trace_timeline, load_trace
 DEFAULT_GATE_SUMMARY_PATH = Path("before.json")
 DEFAULT_GATE_JUNIT_PATH = Path("before.junit.xml")
 DEFAULT_GATE_SARIF_PATH = Path("before.sarif")
+DEFAULT_GITHUB_GATE_WORKFLOW_PATH = Path(".github") / "workflows" / "redteamci-agent-security.yml"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -179,10 +180,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--dashboard", action="store_true")
 
     init = subparsers.add_parser("init")
-    init.add_argument("--config", default=str(DEFAULT_MANIFEST_PATH))
+    init.add_argument("--config", default="redteamci.yml")
     init.add_argument("--agent", choices=["builtin", "http"], default="builtin")
     init.add_argument("--agent-url", default=DEFAULT_HTTP_DEMO_URL)
     init.add_argument("--force", action="store_true")
+    init.add_argument("--github-workflow", action="store_true")
 
     dashboard = subparsers.add_parser("dashboard")
     dashboard.add_argument("streamlit_args", nargs=argparse.REMAINDER)
@@ -500,6 +502,10 @@ def init_command(args: argparse.Namespace) -> int:
     if path.exists() and not args.force:
         print(f"{path} already exists. Use --force to overwrite.")
         return 1
+    workflow_path = Path.cwd() / DEFAULT_GITHUB_GATE_WORKFLOW_PATH
+    if args.github_workflow and workflow_path.exists() and not args.force:
+        print(f"{workflow_path} already exists. Use --force to overwrite.")
+        return 1
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"agent: {args.agent}",
@@ -516,7 +522,68 @@ def init_command(args: argparse.Namespace) -> int:
     )
     path.write_text("\n".join(lines), encoding="utf-8")
     print(f"Wrote {path}")
+    if args.github_workflow:
+        workflow_path.parent.mkdir(parents=True, exist_ok=True)
+        workflow_path.write_text(
+            _github_gate_workflow(config_path=_workflow_config_path(path)),
+            encoding="utf-8",
+        )
+        print(f"Wrote {workflow_path}")
     return 0
+
+
+def _github_gate_workflow(*, config_path: str) -> str:
+    return f"""name: RedTeamCI Agent Security
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+jobs:
+  redteamci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install RedTeamCI
+        run: python -m pip install git+https://github.com/saigudisa6/berkai.git
+
+      - name: Validate RedTeamCI configuration
+        run: python -m redteamci.cli doctor --config {config_path}
+
+      - name: Run RedTeamCI security gate
+        run: python -m redteamci.cli gate --config {config_path} --github-annotations
+
+      - name: Upload RedTeamCI artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redteamci-agent-security
+          if-no-files-found: ignore
+          path: |
+            before.json
+            before.junit.xml
+            before.sarif
+            traces/
+            regressions/generated_attacks.json
+"""
+
+
+def _workflow_config_path(config_path: Path) -> str:
+    if config_path.is_absolute():
+        try:
+            return config_path.relative_to(Path.cwd()).as_posix()
+        except ValueError:
+            return config_path.as_posix()
+    return config_path.as_posix()
 
 
 def latest_command(args: argparse.Namespace) -> int:
