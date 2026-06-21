@@ -9,7 +9,11 @@ import sys
 from pathlib import Path
 
 from .adapters import DEFAULT_HTTP_DEMO_URL, AgentConfig, check_http_agent
-from .claude_code import ClaudeCodeRemediator
+from .claude_code import (
+    ClaudeCodeRemediator,
+    build_claude_prompt,
+    write_claude_prompt_artifact,
+)
 from .config import load_manifest
 from .patcher import load_trace_for_attack
 from .paths import (
@@ -41,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_command(args, rerun=True)
     if args.command == "fix":
         return fix_command(args)
+    if args.command == "claude":
+        return claude_command(args)
     if args.command == "reset":
         return reset_command(args)
     if args.command == "dashboard":
@@ -90,7 +96,32 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("--use-fixture", action="store_true")
     fix.add_argument("--apply", action="store_true")
     fix.add_argument("--dry-run", action="store_true")
+    fix.add_argument("--max-turns", type=int, default=12)
+    fix.add_argument("--timeout", type=int, default=300)
+    fix.add_argument("--no-fixture-fallback", action="store_true")
     fix.add_argument("--json", action="store_true")
+
+    claude = subparsers.add_parser("claude")
+    claude_sub = claude.add_subparsers(dest="claude_command")
+
+    claude_sub.add_parser("status")
+
+    claude_prompt = claude_sub.add_parser("prompt")
+    claude_prompt.add_argument("attack_id")
+    claude_prompt.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
+    claude_prompt.add_argument("--traces-root", default=str(TRACES_ROOT))
+    claude_prompt.add_argument("--run-id")
+
+    claude_remediate = claude_sub.add_parser("remediate")
+    claude_remediate.add_argument("attack_id")
+    claude_remediate.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
+    claude_remediate.add_argument("--traces-root", default=str(TRACES_ROOT))
+    claude_remediate.add_argument("--run-id")
+    claude_remediate.add_argument("--apply", action="store_true")
+    claude_remediate.add_argument("--max-turns", type=int, default=12)
+    claude_remediate.add_argument("--timeout", type=int, default=300)
+    claude_remediate.add_argument("--no-fixture-fallback", action="store_true")
+    claude_remediate.add_argument("--json", action="store_true")
 
     reset = subparsers.add_parser("reset")
     reset.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
@@ -102,6 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
     doctor.add_argument("--regressions")
     doctor.add_argument("--attacks", dest="attack_pack")
+    doctor.add_argument("--dashboard", action="store_true")
 
     init = subparsers.add_parser("init")
     init.add_argument("--config", default=str(DEFAULT_MANIFEST_PATH))
@@ -177,7 +209,9 @@ def fix_command(args: argparse.Namespace) -> int:
         guardrails_path=Path(args.guardrails),
         apply=apply,
         use_fixture=args.use_fixture,
-        allow_fixture_fallback=not args.claude_code or args.use_fixture,
+        allow_fixture_fallback=not args.no_fixture_fallback,
+        max_turns=args.max_turns,
+        timeout=args.timeout,
     )
 
     if args.json:
@@ -192,6 +226,9 @@ def fix_command(args: argparse.Namespace) -> int:
                     "regression_test_path": result.regression_test_path,
                     "diff": result.patch_diff,
                     "error": result.error,
+                    "prompt_path": result.prompt_path,
+                    "raw_output_path": result.raw_output_path,
+                    "fixture_fallback_used": result.fixture_fallback_used,
                 },
                 indent=2,
             )
@@ -204,6 +241,12 @@ def fix_command(args: argparse.Namespace) -> int:
     print(f"Patch summary: {result.summary_path}")
     if result.regression_test_path:
         print(f"Regression test: {result.regression_test_path}")
+    if result.prompt_path:
+        print(f"Claude prompt: {result.prompt_path}")
+    if result.raw_output_path:
+        print(f"Claude raw output: {result.raw_output_path}")
+    if result.fixture_fallback_used:
+        print("Fixture fallback used: True")
     print()
     print("Patch:")
     print(result.patch_diff.rstrip() or "No guardrail changes needed.")
@@ -213,6 +256,88 @@ def fix_command(args: argparse.Namespace) -> int:
     else:
         print("Patch diff saved.")
     return 0 if result.success else 1
+
+
+def claude_command(args: argparse.Namespace) -> int:
+    remediator = ClaudeCodeRemediator()
+    if args.claude_command == "status":
+        executable = remediator.executable()
+        print(f"Claude Code available: {bool(executable)}")
+        print(f"Claude Code executable: {executable or '-'}")
+        print("Fixture fallback available: True")
+        return 0
+    if args.claude_command == "prompt":
+        trace = load_trace_for_attack(
+            attack_id=args.attack_id,
+            traces_root=args.traces_root,
+            run_id=args.run_id,
+        )
+        trace_path = Path(trace["trace_path"])
+        run_id = str(trace.get("run_id", "run_unknown"))
+        summary_path = PATCHES_ROOT / f"{run_id}_{args.attack_id}_claude_summary.json"
+        prompt = build_claude_prompt(
+            attack_id=args.attack_id,
+            trace=trace,
+            guardrails_yaml=Path(args.guardrails).read_text(encoding="utf-8"),
+            run_id=run_id,
+            summary_path=summary_path,
+            trace_path=trace_path,
+        )
+        prompt_path = write_claude_prompt_artifact(
+            attack_id=args.attack_id,
+            run_id=run_id,
+            prompt=prompt,
+        )
+        print(f"Wrote Claude prompt: {prompt_path}")
+        return 0
+    if args.claude_command == "remediate":
+        trace = load_trace_for_attack(
+            attack_id=args.attack_id,
+            traces_root=args.traces_root,
+            run_id=args.run_id,
+        )
+        result = remediator.remediate(
+            attack_id=args.attack_id,
+            trace_path=Path(trace["trace_path"]),
+            guardrails_path=Path(args.guardrails),
+            apply=args.apply,
+            use_fixture=False,
+            allow_fixture_fallback=not args.no_fixture_fallback,
+            max_turns=args.max_turns,
+            timeout=args.timeout,
+        )
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "source": result.source,
+                        "success": result.success,
+                        "changed_files": result.changed_files,
+                        "summary_path": result.summary_path,
+                        "prompt_path": result.prompt_path,
+                        "raw_output_path": result.raw_output_path,
+                        "fixture_fallback_used": result.fixture_fallback_used,
+                        "error": result.error,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(f"Source: {result.source}")
+            print(f"Success: {result.success}")
+            print(f"Changed files: {result.changed_files}")
+            print(f"Patch summary: {result.summary_path}")
+            if result.prompt_path:
+                print(f"Claude prompt: {result.prompt_path}")
+            if result.raw_output_path:
+                print(f"Claude raw output: {result.raw_output_path}")
+            if result.fixture_fallback_used:
+                print("Fixture fallback used: True")
+            if result.error:
+                print(f"Error: {result.error}")
+        return 0 if result.success else 1
+    print("Usage: redteamci claude {status,prompt,remediate}")
+    return 1
 
 
 def reset_command(args: argparse.Namespace) -> int:
@@ -437,8 +562,10 @@ def _doctor_checks(args: argparse.Namespace) -> list[tuple[bool, str]]:
     streamlit_available = importlib.util.find_spec("streamlit") is not None
     checks.append(
         (
-            streamlit_available,
-            "Streamlit importable" if streamlit_available else "Streamlit not installed",
+            streamlit_available or not args.dashboard,
+            "Streamlit importable"
+            if streamlit_available
+            else "Streamlit not installed; dashboard check skipped",
         )
     )
     claude_available = shutil.which("claude") is not None or (

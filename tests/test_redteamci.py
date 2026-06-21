@@ -7,6 +7,7 @@ from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from subprocess import CompletedProcess
 from threading import Thread
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from unittest.mock import patch
 from redteamci.adapters import AgentConfig, HTTPAgentError, run_http_agent
 from redteamci.attacks import load_attack_pack, load_generated_attacks
 from redteamci.cli import _configured_path, main, print_run_report
+from redteamci.claude_code import ClaudeCodeRemediator, build_claude_prompt
 from redteamci.config import load_guardrails, load_manifest
 from redteamci.integrations.sentry_integration import capture_failure_if_configured
 from redteamci.patcher import apply_patch_document, load_fixture_patch
@@ -255,6 +257,109 @@ class RedTeamCITest(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertEqual(quiet_main(["doctor", "--config", str(config)]), 1)
+
+    def test_doctor_streamlit_is_optional_unless_dashboard_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            guardrails = tmp_path / "guardrails.yml"
+            guardrails.write_text("allowed_tools:\n", encoding="utf-8")
+            regressions = tmp_path / "regressions" / "generated_attacks.json"
+            regressions.parent.mkdir()
+            config = tmp_path / "redteamci.yml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "agent: builtin",
+                        "guardrails: guardrails.yml",
+                        "regressions: regressions/generated_attacks.json",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch("redteamci.cli.importlib.util.find_spec", return_value=None):
+                self.assertEqual(quiet_main(["doctor", "--config", str(config)]), 0)
+                self.assertEqual(
+                    quiet_main(["doctor", "--config", str(config), "--dashboard"]),
+                    1,
+                )
+
+    def test_http_example_manifest_resolves_to_repo_root_paths(self) -> None:
+        manifest_path = ROOT / "examples" / "redteamci.http.yml"
+        manifest = load_manifest(manifest_path)
+        manifest["_base_dir"] = str(manifest_path.parent)
+        self.assertEqual(
+            Path(_configured_path(None, ROOT / "guardrails.yml", manifest, "guardrails")).resolve(),
+            (ROOT / "guardrails.yml").resolve(),
+        )
+        self.assertEqual(
+            Path(_configured_path(None, ROOT / "regressions" / "generated_attacks.json", manifest, "regressions")).resolve(),
+            (ROOT / "regressions" / "generated_attacks.json").resolve(),
+        )
+
+    def test_claude_executable_prefers_configured_env_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "claude.exe"
+            fake.write_text("", encoding="utf-8")
+            with patch.dict("os.environ", {"CLAUDE_CODE_PATH": str(fake)}, clear=True):
+                self.assertEqual(ClaudeCodeRemediator().executable(), str(fake))
+
+    def test_claude_prompt_is_compact_and_trace_based(self) -> None:
+        trace = {
+            "run_id": "run_001",
+            "outcome_reason": "Secret-like content appeared after read_file('.env').",
+            "events": [
+                {"type": "tool_call_attempted", "tool": "read_file", "args": {"path": ".env"}},
+                {"type": "tool_call_executed", "tool": "read_file", "args": {"path": ".env"}},
+                {"type": "outcome", "status": "FAIL"},
+            ],
+        }
+        prompt = build_claude_prompt(
+            attack_id="pi-003",
+            trace=trace,
+            guardrails_yaml="allowed_tools:\n",
+            run_id="run_001",
+            summary_path=Path("patches/run_001_pi-003_claude_summary.json"),
+            trace_path=Path("traces/run_001/pi-003.json"),
+        )
+        self.assertIn("ATTACK_ID: pi-003", prompt)
+        self.assertIn("TRACE_PATH: traces/run_001/pi-003.json", prompt)
+        self.assertIn("KEY_TRACE_EVENTS", prompt)
+        self.assertIn("guardrails.yml", prompt)
+        self.assertIn("regressions/generated_attacks.json", prompt)
+
+    def test_claude_no_edit_result_records_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            guardrails = tmp_path / "guardrails.yml"
+            guardrails.write_text("allowed_tools:\n", encoding="utf-8")
+            trace = {
+                "run_id": "run_test",
+                "attack_id": "pi-003",
+                "attack_name": "Browser Hidden Injection",
+                "outcome_reason": "failed",
+                "trace_path": str(tmp_path / "pi-003.json"),
+                "events": [{"type": "outcome", "status": "FAIL"}],
+            }
+            trace_path = tmp_path / "pi-003.json"
+            trace_path.write_text(json.dumps(trace), encoding="utf-8")
+            fake = tmp_path / "claude.exe"
+            fake.write_text("", encoding="utf-8")
+            completed = CompletedProcess(args=[str(fake)], returncode=0, stdout="{}", stderr="")
+            with patch.dict("os.environ", {"CLAUDE_CODE_PATH": str(fake)}, clear=True):
+                with patch("redteamci.claude_code.subprocess.run", return_value=completed):
+                    result = ClaudeCodeRemediator().remediate(
+                        attack_id="pi-003",
+                        trace_path=trace_path,
+                        guardrails_path=guardrails,
+                        apply=True,
+                        allow_fixture_fallback=False,
+                    )
+            self.assertFalse(result.success)
+            self.assertTrue(result.prompt_path and Path(result.prompt_path).exists())
+            self.assertTrue(result.raw_output_path and Path(result.raw_output_path).exists())
+            summary = json.loads(Path(result.summary_path).read_text(encoding="utf-8"))
+            self.assertEqual(summary["claude_code_executable"], str(fake))
+            self.assertIn("did not produce successful edits", summary["error"])
 
     def test_sentry_noops_without_dsn(self) -> None:
         with patch.dict("os.environ", {}, clear=True):

@@ -144,6 +144,35 @@ attacks: attacks/redteamci_attacks.json
 Attack pack files use the same shape as generated regressions: `id`, `name`,
 `task`, `expected_after_patch`, and optional `setup`.
 
+You can also validate and run the checked-in HTTP example manifest:
+
+```bash
+python -m redteamci.cli doctor --config examples/redteamci.http.yml
+python -m redteamci.cli run --config examples/redteamci.http.yml --expect-fail
+```
+
+## Claude Code Integration
+
+The judged demo uses an offline Claude Code remediation artifact for
+deterministic replay:
+
+```bash
+python -m redteamci.cli fix pi-003 --use-fixture --apply
+```
+
+The live Claude Code integration is inspectable and uses the same contract:
+failed trace, guardrail patch, generated regression, and stored artifacts.
+
+```bash
+python -m redteamci.cli claude status
+python -m redteamci.cli claude prompt pi-003 --run-id run_001
+python -m redteamci.cli claude remediate pi-003 --apply
+```
+
+Claude artifacts are written under `patches/`, including the prompt, raw
+Claude output, summary JSON, and diff. Use `--no-fixture-fallback` for strict
+live mode, or rely on the default fixture fallback for demo reliability.
+
 ## What It Ships
 
 - Four deterministic tests:
