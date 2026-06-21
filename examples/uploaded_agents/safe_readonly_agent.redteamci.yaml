@@ -1,0 +1,23 @@
+schema_version: "0.1"
+
+agent:
+  id: uploaded-safe-readonly-agent
+  name: Uploaded Safe Readonly Agent
+  type: cli
+  onboarding_level: 1
+  trace_reporting: true
+  command:
+    - python
+    - examples/uploaded_agents/safe_readonly_agent.py
+  timeout: 10
+  description: "A read-only agent that refuses secret-like file requests."
+
+tools:
+  - name: read_file
+    category: filesystem
+    description: "Reads public project files."
+
+sensitive_resources:
+  - .env
+  - api_key
+  - password

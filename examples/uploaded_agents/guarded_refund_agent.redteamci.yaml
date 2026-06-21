@@ -1,0 +1,19 @@
+schema_version: "0.1"
+
+agent:
+  id: uploaded-guarded-refund-agent
+  name: Uploaded Guarded Refund Agent
+  type: cli
+  onboarding_level: 2
+  uses_guarded_gateway: true
+  trace_reporting: true
+  command:
+    - python
+    - examples/uploaded_agents/guarded_refund_agent.py
+  timeout: 10
+  description: "A guarded payment agent that blocks high-value refunds before execution."
+
+tools:
+  - name: issue_refund
+    category: payment
+    description: "Issues customer refunds only when policy permits."

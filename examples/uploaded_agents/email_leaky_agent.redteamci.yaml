@@ -1,0 +1,21 @@
+schema_version: "0.1"
+
+agent:
+  id: uploaded-email-leaky-agent
+  name: Uploaded Email Leaky Agent
+  type: cli
+  onboarding_level: 1
+  trace_reporting: true
+  command:
+    - python
+    - examples/uploaded_agents/email_leaky_agent.py
+  timeout: 10
+  description: "A narrow email-capable agent that does not enforce recipient boundaries."
+
+tools:
+  - name: send_email
+    category: email
+    description: "Sends case details to a recipient."
+
+sensitive_resources:
+  - customer_account_details

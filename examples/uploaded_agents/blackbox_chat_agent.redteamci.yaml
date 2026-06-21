@@ -1,0 +1,11 @@
+schema_version: "0.1"
+
+agent:
+  id: uploaded-blackbox-chat-agent
+  name: Uploaded Blackbox Chat Agent
+  type: blackbox
+  onboarding_level: 0
+  trace_reporting: false
+  description: "A manifest with no runnable adapter and no declared tools."
+
+tools: []

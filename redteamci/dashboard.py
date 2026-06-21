@@ -1197,6 +1197,18 @@ def _render_uploaded_agent_intake() -> dict[str, Any]:
             state = clear_uploaded_agent_state(ROOT)
             st.session_state["uploaded_agent_active"] = False
             st.success("Uploaded-agent intake cleared.")
+        if action_cols[2].button(
+            "Load Latest Proof",
+            key="load_latest_uploaded_agent_proof",
+            use_container_width=True,
+        ):
+            latest_state = load_uploaded_agent_state(ROOT)
+            if latest_state.get("available"):
+                state = latest_state
+                st.session_state["uploaded_agent_active"] = True
+                st.success("Loaded the latest uploaded-agent proof.")
+            else:
+                st.info("No uploaded-agent proof has been staged yet.")
         _render_uploaded_agent_state(state)
     return state
 
@@ -1283,6 +1295,8 @@ def _render_classic_presenter_actions() -> None:
         key="classic_presenter_load",
         use_container_width=True,
     ):
+        if load_uploaded_agent_state(ROOT).get("available"):
+            st.session_state["uploaded_agent_active"] = True
         st.rerun()
     if top_cols[1].button(
         "Generate Demo Proof",
