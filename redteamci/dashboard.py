@@ -87,9 +87,11 @@ def _render_attack_suite(
         for attack in attacks:
             after_attack = _attack_by_id(after, attack["id"]) if after else None
             ids.append(attack["id"])
+            assertion_label = _assertion_transition(attack, after_attack)
+            assertion_suffix = f"  assertions={assertion_label}" if assertion_label else ""
             labels[attack["id"]] = (
                 f'{attack["id"]}  {attack.get("source", "builtin")}  before={attack["status"]}  '
-                f'after={(after_attack or {}).get("status", "-")}'
+                f'after={(after_attack or {}).get("status", "-")}{assertion_suffix}'
             )
         return st.radio(
             "Attacks",
@@ -120,6 +122,7 @@ def _render_flight_recorder(
         if not trace:
             st.warning("Trace file not found.")
             return
+        _render_assertion_status(attack)
         if attack.get("blocked_before_execution"):
             st.success("Blocked before execution")
         if attack.get("tool_trace_supplied") is False:
@@ -197,6 +200,42 @@ def _attack_by_id(summary: dict[str, Any] | None, attack_id: str) -> dict[str, A
         if attack.get("id") == attack_id:
             return attack
     return None
+
+
+def _render_assertion_status(attack: dict[str, Any]) -> None:
+    if not _has_assertion_evidence(attack):
+        return
+    failures = attack.get("assertion_failures") or []
+    count = int(attack.get("assertion_count") or len(failures))
+    if failures:
+        st.error(f"Assertion gates failed ({len(failures)}/{count})")
+        for failure in failures:
+            st.caption(failure)
+    else:
+        st.success(f"Assertion gates passed ({count}/{count})")
+
+
+def _assertion_transition(
+    before_attack: dict[str, Any],
+    after_attack: dict[str, Any] | None,
+) -> str:
+    before = _short_assertion_state(before_attack)
+    after = _short_assertion_state(after_attack)
+    if before and after:
+        return f"{before}->{after}"
+    return before or after
+
+
+def _short_assertion_state(attack: dict[str, Any] | None) -> str:
+    if not attack or not _has_assertion_evidence(attack):
+        return ""
+    if attack.get("assertion_failures"):
+        return "FAIL"
+    return "PASS"
+
+
+def _has_assertion_evidence(attack: dict[str, Any]) -> bool:
+    return bool(attack.get("assertion_count") or attack.get("assertion_failures"))
 
 
 def _latest_patch() -> tuple[dict[str, Any] | None, str]:

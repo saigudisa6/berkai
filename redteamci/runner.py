@@ -43,6 +43,7 @@ class AttackResult:
     redis_event_count: int = 0
     source: str = "builtin"
     tool_trace_supplied: bool = True
+    assertion_count: int = 0
     assertion_failures: list[str] | None = None
 
     def __post_init__(self) -> None:
@@ -234,6 +235,7 @@ def run_attack(
         redis_event_count=recorder.redis.event_count,
         source=attack.source,
         tool_trace_supplied=tool_trace_supplied,
+        assertion_count=len(attack.assertions),
         assertion_failures=assertion_failures,
     )
 

@@ -71,6 +71,10 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
             )
         )
 
+    assertion_gate_lines = _assertion_gate_lines(before, after)
+    if assertion_gate_lines:
+        lines.extend(["", "## Custom Assertion Gates", "", *assertion_gate_lines])
+
     lines.extend(["", "## Generated Regression Result", ""])
     if generated_attacks:
         for attack in generated_attacks:
@@ -177,6 +181,61 @@ def _attack_union(before: dict[str, Any], after: dict[str, Any]) -> list[dict[st
             },
         )
     return list(attacks.values())
+
+
+def _assertion_gate_lines(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    rows = []
+    failures = []
+    for before_attack in _attack_union(before, after):
+        after_attack = _attack_by_id(after, before_attack["id"]) or {}
+        if not (
+            _has_assertion_evidence(before_attack)
+            or _has_assertion_evidence(after_attack)
+        ):
+            continue
+        source = after_attack.get("source", before_attack.get("source", "builtin"))
+        rows.append(
+            " | ".join(
+                [
+                    before_attack["id"],
+                    source,
+                    before_attack["name"],
+                    _assertion_state(before_attack),
+                    _assertion_state(after_attack),
+                ]
+            )
+        )
+        for failure in before_attack.get("assertion_failures") or []:
+            failures.append(f"- {before_attack['id']} before: {failure}")
+        for failure in after_attack.get("assertion_failures") or []:
+            failures.append(f"- {before_attack['id']} after: {failure}")
+
+    if not rows:
+        return []
+    lines = [
+        "Attack ID | Source | Name | Before Assertions | After Assertions",
+        "--- | --- | --- | --- | ---",
+        *rows,
+    ]
+    if failures:
+        lines.extend(["", "Assertion failure details:", *failures])
+    return lines
+
+
+def _has_assertion_evidence(attack: dict[str, Any]) -> bool:
+    return bool(attack.get("assertion_count") or attack.get("assertion_failures"))
+
+
+def _assertion_state(attack: dict[str, Any]) -> str:
+    if not attack:
+        return "NOT RUN"
+    failures = attack.get("assertion_failures") or []
+    if failures:
+        return f"FAIL ({len(failures)} failed)"
+    count = int(attack.get("assertion_count") or 0)
+    if count:
+        return f"PASS ({count} passed)"
+    return "-"
 
 
 def _latest_patch() -> tuple[dict[str, Any], str]:

@@ -961,6 +961,7 @@ class RedTeamCITest(unittest.TestCase):
                 for attack in first.summary["attacks"]
                 if attack["id"] == "custom-env-exfil-001"
             )
+            self.assertEqual(custom_before["assertion_count"], 3)
             self.assertTrue(custom_before["assertion_failures"])
             before_trace = json.loads(
                 (traces_root / first.run_id / "custom-env-exfil-001.json").read_text(
@@ -994,6 +995,7 @@ class RedTeamCITest(unittest.TestCase):
                 for attack in second.summary["attacks"]
                 if attack["id"] == "custom-env-exfil-001"
             )
+            self.assertEqual(custom_after["assertion_count"], 3)
             self.assertEqual(custom_after["assertion_failures"], [])
             after_trace = json.loads(
                 (traces_root / second.run_id / "custom-env-exfil-001.json").read_text(
@@ -1007,7 +1009,11 @@ class RedTeamCITest(unittest.TestCase):
             stdout = StringIO()
             with redirect_stdout(stdout):
                 print_run_report(first)
-            self.assertIn("Source: custom", stdout.getvalue())
+            cli_output = stdout.getvalue()
+            self.assertIn("Source: custom", cli_output)
+            self.assertIn("Assertion gates failed:", cli_output)
+            self.assertIn("Assertion no_tool_call failed", cli_output)
+            self.assertIn("Assertion blocked_before_execution failed", cli_output)
 
             before_path = tmp_path / "custom_before.json"
             after_path = tmp_path / "custom_after.json"
@@ -1017,6 +1023,16 @@ class RedTeamCITest(unittest.TestCase):
             generate_report(before_path=before_path, after_path=after_path, output_path=report_path)
             report = report_path.read_text(encoding="utf-8")
             self.assertIn("custom-env-exfil-001 | custom", report)
+            self.assertIn("## Custom Assertion Gates", report)
+            self.assertIn(
+                (
+                    "custom-env-exfil-001 | custom | Custom Env Exfiltration Gate | "
+                    "FAIL (2 failed) | PASS (3 passed)"
+                ),
+                report,
+            )
+            self.assertIn("Assertion failure details:", report)
+            self.assertIn("Assertion no_tool_call failed", report)
             self.assertIn("Generated regression tests loaded: 1", report)
 
 
