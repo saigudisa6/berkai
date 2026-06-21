@@ -16,6 +16,7 @@ from .claude_code import (
     write_claude_prompt_artifact,
 )
 from .config import load_manifest
+from .github_annotations import ANNOTATION_LEVELS, render_github_annotations
 from .github_summary import DEFAULT_GITHUB_SUMMARY_PATH, write_github_summary
 from .patcher import load_trace_for_attack
 from .paths import (
@@ -34,7 +35,7 @@ from .paths import (
 )
 from .report import generate_report
 from .runner import RunReport, latest_run_dir, run_suite
-from .summary import write_junit_summary, write_sarif_summary, write_summary
+from .summary import load_summary, write_junit_summary, write_sarif_summary, write_summary
 from .trace_viewer import format_trace_timeline, load_trace
 
 
@@ -64,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
         return report_command(args)
     if args.command == "github-summary":
         return github_summary_command(args)
+    if args.command == "github-annotations":
+        return github_annotations_command(args)
     if args.command == "trace":
         return trace_command(args)
 
@@ -169,6 +172,14 @@ def build_parser() -> argparse.ArgumentParser:
     github_summary.add_argument("--after", default=str(DEFAULT_AFTER_SUMMARY_PATH))
     github_summary.add_argument("--output", default=str(DEFAULT_GITHUB_SUMMARY_PATH))
     github_summary.add_argument("--github-step-summary", action="store_true")
+
+    github_annotations = subparsers.add_parser("github-annotations")
+    github_annotations.add_argument("--summary", default=str(DEFAULT_BEFORE_SUMMARY_PATH))
+    github_annotations.add_argument(
+        "--level",
+        choices=ANNOTATION_LEVELS,
+        default="error",
+    )
 
     trace = subparsers.add_parser("trace")
     trace.add_argument("attack_id")
@@ -470,6 +481,13 @@ def github_summary_command(args: argparse.Namespace) -> int:
                 "GITHUB_STEP_SUMMARY is not set; wrote "
                 f"{output} without appending a job summary."
             )
+    return 0
+
+
+def github_annotations_command(args: argparse.Namespace) -> int:
+    summary = load_summary(args.summary)
+    for annotation in render_github_annotations(summary, level=args.level):
+        print(annotation)
     return 0
 
 

@@ -23,6 +23,7 @@ from redteamci.claude_code import (
     validate_patch_document,
 )
 from redteamci.config import load_guardrails, load_manifest
+from redteamci.github_annotations import render_github_annotations
 from redteamci.github_summary import render_github_summary
 from redteamci.integrations.sentry_integration import capture_failure_if_configured
 from redteamci.patcher import apply_patch_document, load_fixture_patch
@@ -1547,6 +1548,122 @@ class RedTeamCITest(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(missing_output.exists())
             self.assertIn("GITHUB_STEP_SUMMARY is not set", stdout)
+
+    def test_github_annotations_escape_redact_and_skip_passes(self) -> None:
+        summary = {
+            "run_id": "run_001",
+            "attacks": [
+                {
+                    "id": "pi-003",
+                    "name": "Browser Hidden Injection, API: Foo",
+                    "status": "FAIL",
+                    "source": "builtin",
+                    "reason": "Secret leaked: OPENAI_API_KEY=sk-fake-demo\n100% unsafe",
+                    "trace_path": str(ROOT / "traces" / "run_001" / "pi-003.json"),
+                    "blocked_before_execution": False,
+                    "dangerous_tools_attempted": [
+                        "read_file",
+                        "http_post:external,secret",
+                    ],
+                    "dangerous_tools_blocked": ["read_file"],
+                    "assertion_failures": [
+                        "no_secret_output failed: DB_PASSWORD=hunter2"
+                    ],
+                },
+                {
+                    "id": "safe-001",
+                    "name": "Benign README Read",
+                    "status": "PASS",
+                    "source": "builtin",
+                    "reason": "safe PASS with OPENAI_API_KEY=sk-fake-hidden",
+                    "trace_path": "traces/run_001/safe-001.json",
+                },
+            ],
+        }
+
+        annotations = render_github_annotations(summary, level="warning")
+
+        self.assertEqual(len(annotations), 1)
+        annotation = annotations[0]
+        self.assertTrue(
+            annotation.startswith(
+                "::warning file=traces/run_001/pi-003.json,line=1,"
+                "title=RedTeamCI failed%3A pi-003 Browser Hidden Injection%2C API%3A Foo::"
+            )
+        )
+        self.assertIn("Reason: Secret leaked: OPENAI_API_KEY=[REDACTED:", annotation)
+        self.assertIn("100%25 unsafe", annotation)
+        self.assertIn("%0A", annotation)
+        self.assertIn("Source: builtin", annotation)
+        self.assertIn("Blocked before execution: false", annotation)
+        self.assertIn(
+            "Dangerous tools attempted: read_file, http_post:external,secret",
+            annotation,
+        )
+        self.assertIn("Dangerous tools blocked: read_file", annotation)
+        self.assertIn("Assertion failures:", annotation)
+        self.assertIn(
+            "Trace replay: python -m redteamci.cli trace pi-003 --run-id run_001",
+            annotation,
+        )
+        self.assertNotIn("sk-fake", annotation)
+        self.assertNotIn("hunter2", annotation)
+        self.assertNotIn("safe-001", annotation)
+
+    def test_cli_github_annotations_reads_before_summary(self) -> None:
+        summary = {
+            "run_id": "run_cli",
+            "attacks": [
+                {
+                    "id": "pi-003",
+                    "name": "Browser Hidden Injection",
+                    "status": "FAIL",
+                    "source": "builtin",
+                    "reason": "failed",
+                    "trace_path": "traces/run_cli/pi-003.json",
+                    "blocked_before_execution": True,
+                    "dangerous_tools_attempted": ["read_file"],
+                    "dangerous_tools_blocked": ["read_file"],
+                    "assertion_failures": [],
+                },
+                {
+                    "id": "safe-001",
+                    "name": "Benign README Read",
+                    "status": "PASS",
+                    "source": "builtin",
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            before_path = Path(tmp) / "before.json"
+            before_path.write_text(json.dumps(summary), encoding="utf-8")
+
+            code, stdout = capture_main(
+                [
+                    "github-annotations",
+                    "--summary",
+                    str(before_path),
+                    "--level",
+                    "notice",
+                ]
+            )
+            self.assertEqual(code, 0)
+            lines = stdout.splitlines()
+            self.assertEqual(len(lines), 1)
+            self.assertTrue(lines[0].startswith("::notice file=traces/run_cli/pi-003.json"))
+            self.assertIn("line=1", lines[0])
+            self.assertIn(
+                "title=RedTeamCI failed%3A pi-003 Browser Hidden Injection",
+                lines[0],
+            )
+            self.assertIn("Blocked before execution: true", lines[0])
+            self.assertNotIn("safe-001", lines[0])
+
+            with patch("redteamci.cli.DEFAULT_BEFORE_SUMMARY_PATH", before_path):
+                code, stdout = capture_main(["github-annotations"])
+            self.assertEqual(code, 0)
+            self.assertEqual(len(stdout.splitlines()), 1)
+            self.assertTrue(stdout.startswith("::error "))
 
     def test_optional_custom_release_gate_flow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

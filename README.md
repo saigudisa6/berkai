@@ -71,6 +71,7 @@ python -m redteamci.cli fix pi-003 --use-fixture --apply
 python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml --sarif after.sarif
 python -m redteamci.cli report --before before.json --after after.json
 python -m redteamci.cli github-summary --before before.json --after after.json
+python -m redteamci.cli github-annotations --summary before.json
 python -m redteamci.cli dashboard
 ```
 
@@ -86,6 +87,19 @@ and trace replay commands. In GitHub Actions, pass `--github-step-summary` to
 append the same Markdown to `$GITHUB_STEP_SUMMARY` without extra permissions.
 The checked-in workflow uploads this summary artifact and shows it directly on
 the workflow summary page.
+
+For a real security gate in GitHub Actions, print clickable annotations after
+the run while preserving the original exit status:
+
+```bash
+python -m redteamci.cli run --summary before.json --junit before.junit.xml --sarif before.sarif || status=$?
+python -m redteamci.cli github-annotations --summary before.json
+exit ${status:-0}
+```
+
+`github-annotations` emits one secret-redacted workflow command per failed
+attack, with trace-file links and replay commands. It does not require extra
+GitHub permissions.
 
 Replay a saved flight-recorder trace in CI or demo terminals:
 
@@ -274,6 +288,7 @@ experimental mode with `--mode direct-edit`.
 - Patch summaries and diffs in `patches/`.
 - A Markdown security report.
 - A GitHub Actions job summary plus `redteamci_github_summary.md` artifact.
+- GitHub Actions annotations for failed attacks with trace replay commands.
 - A Streamlit dashboard.
 - A green GitHub Actions workflow using deterministic fixture mode.
 
