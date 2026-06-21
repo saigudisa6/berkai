@@ -11,6 +11,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - lets helper tests run without Streamlit.
     st = None
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from redteamci.paths import (
     DEFAULT_AFTER_SUMMARY_PATH,
     DEFAULT_BEFORE_SUMMARY_PATH,
