@@ -910,11 +910,14 @@ def _render_sentry_incident_panel(state: dict[str, Any]) -> None:
     )
     if context["open_url"]:
         st.link_button("Open in Sentry", context["open_url"])
+    _render_sentry_api_enrichment(context["api_events"])
     with st.expander("Raw Sentry context"):
         st.json(
             {
                 "configured": context["configured"],
+                "api_configured": context["api_configured"],
                 "event_ids": context["event_ids"],
+                "api_events": context["api_events"],
                 "tags": context["tags"],
                 "fingerprint": context["fingerprint"],
                 "artifacts": context["artifact_paths"],
@@ -1427,18 +1430,24 @@ def _render_uploaded_agent_sentry_incident_panel(state: dict[str, Any]) -> None:
     event_ids = integrations.get("sentry_event_ids", [])
     if not isinstance(event_ids, list):
         event_ids = []
+    api_events = _dict_list(integrations.get("sentry_api_events"))
     with st.container(border=True):
         st.subheader("Sentry Incident")
         if os.environ.get("SENTRY_DSN"):
             st.success("Sentry: configured")
         else:
             st.caption("Sentry: optional, not configured")
+        if _sentry_api_env_configured(dict(os.environ)):
+            st.caption("Sentry REST API: configured")
+        else:
+            st.caption("Sentry REST API: optional, not configured")
         if event_ids:
             st.write("Uploaded-agent event IDs")
             for event_id in event_ids:
                 st.code(str(event_id))
         else:
             st.caption("No uploaded-agent Sentry events recorded for the latest red check.")
+        _render_sentry_api_enrichment(api_events)
         with st.expander("Raw uploaded integrations"):
             st.json(integrations)
 
@@ -1690,11 +1699,14 @@ def _render_classic_sentry_incident_panel(state: dict[str, Any]) -> None:
                 st.code(event_id)
         if context["open_url"]:
             st.link_button("Open in Sentry", context["open_url"])
+        _render_sentry_api_enrichment(context["api_events"])
         with st.expander("Raw Sentry context"):
             st.json(
                 {
                     "configured": context["configured"],
+                    "api_configured": context["api_configured"],
                     "event_ids": context["event_ids"],
+                    "api_events": context["api_events"],
                     "tags": context["tags"],
                     "fingerprint": context["fingerprint"],
                     "artifacts": context["artifact_paths"],
@@ -2268,6 +2280,10 @@ def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
         "red",
     )
     red_sentry_events = _sentry_events(red_summary) or _run_sentry_events(state, "red")
+    red_sentry_api_events = _sentry_events_for_key(
+        red_summary,
+        "sentry_api_events",
+    ) or _run_sentry_events_for_key(state, "red", "sentry_api_events")
     green_verification_ids = _sentry_ids(green_summary, "sentry_verification_event_ids") or _run_sentry_ids(
         state,
         "green",
@@ -2277,6 +2293,19 @@ def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
         green_summary,
         "sentry_verification_events",
     ) or _run_sentry_events_for_key(state, "green", "sentry_verification_events")
+    green_sentry_api_events = _sentry_events_for_key(
+        green_summary,
+        "sentry_verification_api_events",
+    ) or _sentry_events_for_key(
+        green_summary,
+        "green_sentry_api_events",
+    ) or _run_sentry_events_for_key(state, "green", "sentry_verification_api_events")
+    if not green_sentry_api_events:
+        green_sentry_api_events = _run_sentry_events_for_key(
+            state,
+            "green",
+            "green_sentry_api_events",
+        )
     executable = ClaudeCodeRemediator().executable()
     return {
         "available": story_root.exists(),
@@ -2289,8 +2318,11 @@ def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
         "claude_code_executable": executable or "",
         "red_sentry_event_ids": red_sentry_event_ids,
         "red_sentry_events": red_sentry_events,
+        "red_sentry_api_events": red_sentry_api_events,
         "green_sentry_verification_event_ids": green_verification_ids,
         "green_sentry_verification_events": green_verification_events,
+        "green_sentry_api_events": green_sentry_api_events,
+        "green_sentry_verification_api_events": green_sentry_api_events,
         "attack_pack": attack_pack,
         "artifacts": artifacts,
         "remediation_summary_exists": remediation_summary_path.exists(),
@@ -2426,10 +2458,54 @@ def collect_evidence_artifacts(root: Path = ROOT) -> list[dict[str, str]]:
     ]
 
 
+def _render_sentry_api_enrichment(api_events: list[dict[str, Any]]) -> None:
+    api_events = _dict_list(api_events)
+    if not api_events:
+        st.caption("Sentry API enrichment: no REST metadata recorded.")
+        return
+
+    if any(bool(event.get("api_verified")) for event in api_events):
+        st.success("Sentry API verified")
+    else:
+        st.warning("Sentry API lookup returned no verified events.")
+
+    for event in api_events:
+        event_id = str(event.get("event_id") or "unknown")
+        if not event.get("api_verified"):
+            error = str(event.get("error") or "lookup failed")
+            st.caption(f"{event_id}: Sentry API lookup failed ({error}).")
+            continue
+
+        title = _short_display(
+            event.get("title") or event.get("message") or event_id,
+            limit=140,
+        )
+        st.markdown(f"**{title}**")
+        fields = [f"event `{event_id}`"]
+        if event.get("level"):
+            fields.append(f"level `{event['level']}`")
+        if event.get("group_id"):
+            fields.append(f"group `{event['group_id']}`")
+        issue = event.get("issue") if isinstance(event.get("issue"), dict) else {}
+        if issue.get("status"):
+            fields.append(f"issue `{issue['status']}`")
+        st.caption(" | ".join(fields))
+        message = _short_display(event.get("message"), limit=320)
+        if message and message != title:
+            st.caption(message)
+        link = event.get("issue_url") or issue.get("permalink") or event.get("event_url")
+        if link:
+            st.markdown(f"[Open API-verified Sentry item]({link})")
+        if event.get("issue_error"):
+            st.caption(f"Issue lookup note: {event['issue_error']}")
+
+
 def _render_sentry_observability(state: dict[str, Any]) -> None:
     context = build_sentry_dashboard_context(state)
     status = "configured" if context["configured"] else "missing"
     st.caption(f"Sentry DSN: {status}")
+    api_status = "configured" if context["api_configured"] else "missing"
+    st.caption(f"Sentry REST API: {api_status}")
     if context["environment"]:
         st.caption(f"Environment: {context['environment']}")
     if context["release"]:
@@ -2458,12 +2534,14 @@ def _render_sentry_observability(state: dict[str, Any]) -> None:
             st.code(event_id)
     if context["open_url"]:
         st.link_button("Open in Sentry", context["open_url"])
+    _render_sentry_api_enrichment(context["api_events"])
 
     with st.expander("Sentry proof context", expanded=True):
         st.json(
             {
                 "tags": context["tags"],
                 "fingerprint": context["fingerprint"],
+                "api_events": context["api_events"],
                 "artifacts": context["artifact_paths"],
             }
         )
@@ -2485,6 +2563,13 @@ def build_sentry_dashboard_context(
     verification_events = [
         event for event in verification_events if isinstance(event, dict)
     ]
+    green_api_events = _dict_list(state.get("green_sentry_api_events")) or _dict_list(
+        state.get("green_sentry_verification_api_events")
+    )
+    api_events = [
+        *_dict_list(state.get("red_sentry_api_events")),
+        *green_api_events,
+    ]
     event_ids = _dedupe(
         [
             *_string_list(state.get("red_sentry_event_ids")),
@@ -2497,6 +2582,11 @@ def build_sentry_dashboard_context(
             *[
                 str(event.get("event_id"))
                 for event in verification_events
+                if event.get("event_id")
+            ],
+            *[
+                str(event.get("event_id"))
+                for event in api_events
                 if event.get("event_id")
             ],
         ]
@@ -2516,11 +2606,29 @@ def build_sentry_dashboard_context(
         "event_ids": event_ids,
         "events": events,
         "verification_events": verification_events,
+        "api_configured": _sentry_api_env_configured(environ),
+        "api_events": api_events,
+        "api_verified": any(bool(event.get("api_verified")) for event in api_events),
         "tags": tags,
         "fingerprint": fingerprint,
         "artifact_paths": _sentry_artifact_paths(extra),
         "open_url": _sentry_search_url(event_ids, environ),
     }
+
+
+def _sentry_api_env_configured(environ: dict[str, str]) -> bool:
+    return bool(
+        environ.get("SENTRY_AUTH_TOKEN")
+        and environ.get("SENTRY_ORG")
+        and environ.get("SENTRY_PROJECT")
+    )
+
+
+def _short_display(value: Any, *, limit: int = 320) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
 
 
 def _html(value: Any) -> str:
@@ -3207,6 +3315,12 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item)]
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 def _dedupe(values: list[str]) -> list[str]:

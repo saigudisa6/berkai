@@ -275,6 +275,22 @@ export SENTRY_ORG=your-org
 export SENTRY_PROJECT=your-project
 ```
 
+To compete for the Sentry API track, add a REST API token as well. RedTeamCI
+will enrich captured event ids with API-verified title, message, level, group,
+issue status, event links, release, environment, and tags:
+
+```bash
+export SENTRY_AUTH_TOKEN=sntrys_...
+export SENTRY_ORG=your-org
+export SENTRY_PROJECT=your-project
+export SENTRY_BASE_URL=https://sentry.io
+```
+
+The token needs `project:read` for event metadata; add `event:read` if you
+want issue status/permalink enrichment. API enrichment is best-effort: missing
+credentials or 401/403/404 responses are recorded as lookup notes and cannot
+fail the RedTeamCI proof.
+
 If Sentry is not configured, the dashboard shows a non-error note and
 `AGENT CERTIFIED` remains based only on the red/green proof.
 

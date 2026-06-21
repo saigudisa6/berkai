@@ -10,6 +10,7 @@ from .sentry_integration import (
     capture_verification_if_configured,
 )
 from .redis_integration import RedisTraceEmitter, write_summary_if_configured
+from .sentry_api import enrich_sentry_event, enrich_sentry_events, sentry_api_configured
 
 
 def summarize_patch_metric(before: int, after: int) -> dict[str, Any]:
@@ -26,6 +27,9 @@ __all__ = [
     "build_verification_event_context",
     "capture_failure_if_configured",
     "capture_verification_if_configured",
+    "enrich_sentry_event",
+    "enrich_sentry_events",
+    "sentry_api_configured",
     "summarize_patch_metric",
     "write_summary_if_configured",
 ]

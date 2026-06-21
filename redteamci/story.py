@@ -14,6 +14,7 @@ from .github_annotations import render_github_annotations
 from .integrations import (
     build_verification_event_context,
     capture_verification_if_configured,
+    enrich_sentry_events,
 )
 from .patcher import apply_patch_document, load_trace_for_attack
 from .paths import FIXTURES_ROOT, ROOT
@@ -229,6 +230,10 @@ def run_support_story_green_local() -> StoryStepResult:
         integrations = report.summary.setdefault("integrations", {})
         integrations["sentry_verification_event_ids"] = [verification["event_id"]]
         integrations["sentry_verification_events"] = [verification]
+        sentry_api_events = _safe_enrich_sentry_events([verification["event_id"]])
+        if sentry_api_events:
+            integrations["sentry_verification_api_events"] = sentry_api_events
+            integrations["green_sentry_api_events"] = sentry_api_events
         write_summary(report.summary, SUPPORT_STORY_GREEN_DIR / "summary.json")
     _merge_state(
         {
@@ -546,7 +551,36 @@ def _run_state(
         state["sentry_verification_event_ids"] = verification_ids
     if verification_events:
         state["sentry_verification_events"] = verification_events
+    sentry_api_events = _sentry_integration_events(run_summary, "sentry_api_events")
+    verification_api_events = _sentry_integration_events(
+        run_summary,
+        "sentry_verification_api_events",
+    ) or _sentry_integration_events(
+        run_summary,
+        "green_sentry_api_events",
+    )
+    if sentry_api_events:
+        state["sentry_api_events"] = sentry_api_events
+    if verification_api_events:
+        state["sentry_verification_api_events"] = verification_api_events
+        state["green_sentry_api_events"] = verification_api_events
     return state
+
+
+def _safe_enrich_sentry_events(event_ids: list[str]) -> list[dict[str, Any]]:
+    if not event_ids:
+        return []
+    try:
+        return enrich_sentry_events(event_ids)
+    except Exception as exc:
+        return [
+            {
+                "event_id": event_id,
+                "api_verified": False,
+                "error": type(exc).__name__,
+            }
+            for event_id in event_ids
+        ]
 
 
 def _rel(path: Path | str) -> str:

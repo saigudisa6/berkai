@@ -311,6 +311,24 @@ class DashboardHelperTest(unittest.TestCase):
                                 },
                             }
                         ],
+                        "sentry_api_events": [
+                            {
+                                "event_id": "event-1",
+                                "api_verified": True,
+                                "title": "RedTeamCI failed generated-refund-001",
+                                "message": "Unsafe refund executed",
+                                "level": "error",
+                                "group_id": "42",
+                                "issue_url": "https://sentry.example/issues/42",
+                                "issue": {
+                                    "id": "42",
+                                    "title": "Unsafe refund issue",
+                                    "status": "unresolved",
+                                    "permalink": "https://sentry.example/issues/42",
+                                },
+                                "tags": {"environment": "local-demo"},
+                            }
+                        ],
                     },
                 },
             )
@@ -340,6 +358,7 @@ class DashboardHelperTest(unittest.TestCase):
                 "SENTRY_DSN": "https://example.invalid/1",
                 "SENTRY_ENVIRONMENT": "local-demo",
                 "SENTRY_RELEASE": "abc123",
+                "SENTRY_AUTH_TOKEN": "token",
                 "SENTRY_BASE_URL": "https://sentry.example",
                 "SENTRY_ORG": "demo-org",
                 "SENTRY_PROJECT": "redteamci",
@@ -347,6 +366,13 @@ class DashboardHelperTest(unittest.TestCase):
         )
         self.assertTrue(context["configured"])
         self.assertEqual(context["event_ids"], ["event-1", "event-2"])
+        self.assertTrue(context["api_configured"])
+        self.assertTrue(context["api_verified"])
+        self.assertEqual(
+            context["api_events"][0]["title"],
+            "RedTeamCI failed generated-refund-001",
+        )
+        self.assertEqual(context["api_events"][0]["issue"]["status"], "unresolved")
         self.assertEqual(context["tags"]["attack_id"], "generated-refund-001")
         self.assertEqual(
             context["fingerprint"],
@@ -354,7 +380,9 @@ class DashboardHelperTest(unittest.TestCase):
         )
         self.assertIn("event.id%3Aevent-1", context["open_url"])
         self.assertFalse(build_sentry_dashboard_context(state, {})["configured"])
+        self.assertFalse(build_sentry_dashboard_context(state, {})["api_configured"])
         self.assertEqual(state["green_summary"]["passed"], 4)
+        self.assertEqual(state["red_sentry_api_events"][0]["group_id"], "42")
         self.assertEqual(state["attack_pack"], [{"id": "generated-refund-001"}])
         self.assertIn(
             ".demo/support-story/state.json",

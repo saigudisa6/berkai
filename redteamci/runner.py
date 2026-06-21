@@ -16,6 +16,7 @@ from .config import load_guardrails
 from .integrations import (
     build_failure_event_context,
     capture_failure_if_configured,
+    enrich_sentry_events,
     write_summary_if_configured,
 )
 from .paths import DEFAULT_GUARDRAILS_PATH, GENERATED_REGRESSIONS_PATH, PATCHES_ROOT, TRACES_ROOT
@@ -119,10 +120,11 @@ def run_suite(
         )
         results.append(result)
 
+    sentry_event_ids = [
+        result.sentry_event_id for result in results if result.sentry_event_id
+    ]
     integrations = {
-        "sentry_event_ids": [
-            result.sentry_event_id for result in results if result.sentry_event_id
-        ],
+        "sentry_event_ids": sentry_event_ids,
         "sentry_events": [
             result.sentry_event_context for result in results if result.sentry_event_context
         ],
@@ -136,6 +138,9 @@ def run_suite(
         "claude_code_patch": _latest_patch_summary_path(),
         "agent": agent_config.label,
     }
+    sentry_api_events = _safe_enrich_sentry_events(sentry_event_ids)
+    if sentry_api_events:
+        integrations["sentry_api_events"] = sentry_api_events
     summary = build_run_summary(
         run_id=run_id,
         results=results,
@@ -298,6 +303,22 @@ def run_attack(
         assertion_count=len(attack.assertions),
         assertion_failures=assertion_failures,
     )
+
+
+def _safe_enrich_sentry_events(event_ids: list[str]) -> list[dict[str, Any]]:
+    if not event_ids:
+        return []
+    try:
+        return enrich_sentry_events(event_ids)
+    except Exception as exc:
+        return [
+            {
+                "event_id": event_id,
+                "api_verified": False,
+                "error": type(exc).__name__,
+            }
+            for event_id in event_ids
+        ]
 
 
 def evaluate_attack(
