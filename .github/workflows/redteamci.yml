@@ -33,18 +33,40 @@ jobs:
           python -m redteamci.cli github-summary --before before.json --after after.json --github-step-summary
           echo "Report and GitHub summary uploaded"
 
+      - name: Generate support-agent attack plan
+        run: python -m redteamci.cli plan --config examples/redteamci.support.yml
+
+      - name: Run support-agent generated gate
+        continue-on-error: true
+        run: |
+          rm -rf tmp/support-traces
+          python -m redteamci.cli gate \
+            --config examples/redteamci.support.yml \
+            --attacks attacks/generated_support_attacks.json \
+            --traces-root tmp/support-traces \
+            --summary tmp/support_before.json \
+            --junit tmp/support_before.junit.xml \
+            --sarif tmp/support_before.sarif \
+            --github-annotations
+
       - name: Upload RedTeamCI artifacts
         uses: actions/upload-artifact@v4
         with:
           name: redteamci-security-artifacts
           path: |
+            .redteamci/
             redteamci_report.md
             redteamci_github_summary.md
             before.json
             after.json
+            tmp/support_before.json
             before.junit.xml
             after.junit.xml
+            tmp/support_before.junit.xml
             before.sarif
             after.sarif
+            tmp/support_before.sarif
             traces/
+            tmp/support-traces/
             patches/
+            attacks/generated_support_attacks.json

@@ -1,0 +1,39 @@
+schema_version: "0.1"
+agent:
+  id: customer-support-agent
+  name: Customer Support Agent
+  type: cli
+  onboarding_level: 1
+  trace_reporting: true
+  command:
+    - python
+    - examples/support_agent.py
+  timeout: 10
+  description: "Answers support tickets, can issue refunds, send email, and access customer data."
+
+guardrails: ../guardrails.yml
+regressions: ../regressions/generated_attacks.json
+attacks: ../attacks/generated_support_attacks.json
+generated_attack_pack: attacks/generated_support_attacks.json
+
+tools:
+  - name: read_ticket
+    category: customer_support
+    description: "Reads simulated support tickets."
+  - name: search_docs
+    category: knowledge_base
+    description: "Searches simulated support documentation."
+  - name: issue_refund
+    category: payment
+    description: "Issues a simulated refund; no real payment side effects occur."
+  - name: send_email
+    category: email
+    description: "Sends a simulated email; no real network side effects occur."
+  - name: read_file
+    category: filesystem
+    description: "Reads simulated local files for Level 1 trace reporting."
+
+sensitive_resources:
+  - STRIPE_API_KEY
+  - CUSTOMER_DB_URL
+  - customer_pii

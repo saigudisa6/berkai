@@ -6,7 +6,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import streamlit as st
+try:
+    import streamlit as st
+except ModuleNotFoundError:  # pragma: no cover - lets helper tests run without Streamlit.
+    st = None
 
 from redteamci.paths import (
     DEFAULT_AFTER_SUMMARY_PATH,
@@ -19,22 +22,38 @@ from redteamci.paths import (
 from redteamci.summary import load_summary
 
 
-st.set_page_config(page_title="RedTeamCI", layout="wide")
+REDTEAMCI_OUTPUT_DIR = ".redteamci"
+AGENT_PROFILE_FILE = "agent_profile.json"
+CAPABILITY_PROFILE_FILE = "capability_profile.json"
+ATTACK_PLAN_FILE = "attack_plan.json"
+ATTACK_PLAN_MARKDOWN_FILE = "attack_plan.md"
+LEVEL_1_WARNING = (
+    "Level 1 trace/report/proposal only; no forced blocking unless the agent uses guarded tools."
+)
 
 
 def main() -> None:
+    streamlit = _require_streamlit()
+    streamlit.set_page_config(page_title="RedTeamCI", layout="wide")
     st.title("RedTeamCI")
     st.caption("Crash-test your AI agent before production.")
 
     before = _load_optional_summary(DEFAULT_BEFORE_SUMMARY_PATH)
     after = _load_optional_summary(DEFAULT_AFTER_SUMMARY_PATH)
     _render_top_metrics(before, after)
-    _render_actions()
+    _render_demo_mode_actions()
+    _render_generated_plan_panel(load_generated_plan_panel(ROOT))
 
     left, middle, right = st.columns([1.3, 2.2, 2.2])
     selected_attack = _render_attack_suite(left, before, after)
     _render_flight_recorder(middle, selected_attack, before, after)
     _render_patch_panel(right)
+
+
+def _require_streamlit() -> Any:
+    if st is None:
+        raise RuntimeError("Streamlit is required to launch the RedTeamCI dashboard.")
+    return st
 
 
 def _render_top_metrics(before: dict[str, Any] | None, after: dict[str, Any] | None) -> None:
@@ -57,6 +76,11 @@ def _render_top_metrics(before: dict[str, Any] | None, after: dict[str, Any] | N
     st.caption(f"Agent: {agent}")
 
 
+def _render_demo_mode_actions() -> None:
+    st.subheader("Demo Mode")
+    _render_actions()
+
+
 def _render_actions() -> None:
     cols = st.columns(4)
     if cols[0].button("Run Tests", use_container_width=True):
@@ -69,6 +93,308 @@ def _render_actions() -> None:
         run_cli(["rerun", "--expect-pass", "--summary", "after.json"])
     if cols[3].button("Generate Report", use_container_width=True):
         run_cli(["report", "--before", "before.json", "--after", "after.json"])
+
+
+def _render_generated_plan_panel(state: dict[str, Any]) -> None:
+    st.subheader("Generated Agent Plan")
+    if not state["available"]:
+        st.info("No generated plan artifacts found.")
+        return
+
+    agent = state["agent"]
+    onboarding = state["onboarding"]
+    cols = st.columns(3)
+    cols[0].metric("Agent", agent["name"])
+    cols[1].metric("Onboarding", onboarding["label"])
+    cols[2].metric("Attack pack", state["generated_attack_pack"] or "-")
+
+    if onboarding["tone"] == "success":
+        st.success(onboarding["message"])
+    elif onboarding["tone"] == "warning":
+        st.warning(onboarding["message"])
+    else:
+        st.info(onboarding["message"])
+
+    left, middle, right = st.columns([1.2, 1.3, 1.5])
+    with left:
+        st.write("Detected capabilities")
+        capabilities = state["capabilities"]
+        if capabilities:
+            for capability in capabilities:
+                status = "yes" if capability["enabled"] else "no"
+                st.caption(f"{status} - {capability['label']}")
+        else:
+            st.caption("No capability profile found.")
+
+    with middle:
+        st.write("Generated test categories")
+        categories = state["categories"]
+        if categories:
+            st.table(
+                [
+                    {
+                        "category": category["name"],
+                        "count": category["count"],
+                        "attack_ids": ", ".join(category["attack_ids"]),
+                    }
+                    for category in categories
+                ]
+            )
+        else:
+            st.caption("No generated categories found.")
+        st.write("Generated attack IDs")
+        st.code("\n".join(state["attack_ids"]) or "No generated attacks found.")
+
+    with right:
+        st.write("Plan artifacts")
+        for artifact in state["plan_artifacts"]:
+            st.caption(f"{artifact['label']}: {artifact['path']}")
+        evidence_artifacts = state["evidence_artifacts"]
+        if evidence_artifacts:
+            st.write("Run evidence")
+            for artifact in evidence_artifacts:
+                st.caption(f"{artifact['label']}: {artifact['path']}")
+
+    markdown = state.get("attack_plan_markdown")
+    if markdown:
+        with st.expander("Attack plan markdown"):
+            st.markdown(markdown)
+
+
+def load_generated_plan_panel(root: Path = ROOT) -> dict[str, Any]:
+    root = Path(root)
+    redteamci_dir = root / REDTEAMCI_OUTPUT_DIR
+    paths = {
+        "agent_profile": redteamci_dir / AGENT_PROFILE_FILE,
+        "capability_profile": redteamci_dir / CAPABILITY_PROFILE_FILE,
+        "attack_plan": redteamci_dir / ATTACK_PLAN_FILE,
+        "attack_plan_markdown": redteamci_dir / ATTACK_PLAN_MARKDOWN_FILE,
+    }
+    agent_profile = _load_json_object(paths["agent_profile"])
+    capability_profile = _load_json_object(paths["capability_profile"])
+    attack_plan = _load_json_object(paths["attack_plan"])
+    attack_plan_markdown = _load_text(paths["attack_plan_markdown"])
+
+    capability_map = _capability_map(capability_profile)
+    onboarding_level = _onboarding_level(agent_profile, capability_profile, attack_plan)
+    uses_guarded_gateway = bool(capability_map.get("uses_guarded_gateway"))
+    generated_attack_pack = _generated_attack_pack_path(root, attack_plan)
+    generated_attacks = _load_generated_attacks(generated_attack_pack)
+
+    available = any(
+        value is not None
+        for value in [agent_profile, capability_profile, attack_plan, attack_plan_markdown]
+    )
+    return {
+        "available": available,
+        "agent": _agent_summary(agent_profile, capability_profile, attack_plan),
+        "onboarding": onboarding_level_notice(onboarding_level, uses_guarded_gateway),
+        "capabilities": _capability_rows(capability_map),
+        "categories": _category_rows(attack_plan, generated_attacks),
+        "attack_ids": _generated_attack_ids(attack_plan, generated_attacks),
+        "generated_attack_pack": _display_path(generated_attack_pack, root)
+        if generated_attack_pack
+        else "",
+        "generated_attack_pack_exists": bool(generated_attack_pack and generated_attack_pack.exists()),
+        "plan_artifacts": _existing_plan_artifacts(paths, root),
+        "evidence_artifacts": collect_evidence_artifacts(root),
+        "attack_plan_markdown": attack_plan_markdown,
+    }
+
+
+def onboarding_level_notice(level: int, uses_guarded_gateway: bool = False) -> dict[str, str]:
+    if level >= 2 or uses_guarded_gateway:
+        return {
+            "label": "Level 2 guarded gateway",
+            "tone": "success",
+            "message": "Level 2 guarded tool gateway; RedTeamCI can prove blocked-before-execution for guarded tools.",
+        }
+    if level == 1:
+        return {
+            "label": "Level 1 trace-reporting agent",
+            "tone": "warning",
+            "message": LEVEL_1_WARNING,
+        }
+    return {
+        "label": "Level 0 output-only agent",
+        "tone": "warning",
+        "message": "Level 0 output-only agent; RedTeamCI can report output failures but cannot verify tool blocking.",
+    }
+
+
+def collect_evidence_artifacts(root: Path = ROOT) -> list[dict[str, str]]:
+    root = Path(root)
+    artifacts: list[tuple[str, Path]] = [
+        ("Before summary", root / "before.json"),
+        ("After summary", root / "after.json"),
+        ("Report", root / "redteamci_report.md"),
+    ]
+
+    traces_root = root / "traces"
+    if traces_root.exists():
+        for path in sorted(traces_root.glob("**/*.json")):
+            artifacts.append(("Trace", path))
+
+    patches_root = root / "patches"
+    if patches_root.exists():
+        patch_artifacts = [
+            path
+            for path in sorted(patches_root.iterdir())
+            if path.is_file() and path.suffix in {".diff", ".json", ".md", ".txt"}
+        ]
+        for path in patch_artifacts[-8:]:
+            artifacts.append(("Claude artifact", path))
+
+    return [
+        {"label": label, "path": _display_path(path, root)}
+        for label, path in artifacts
+        if path.exists()
+    ]
+
+
+def _agent_summary(
+    agent_profile: dict[str, Any] | None,
+    capability_profile: dict[str, Any] | None,
+    attack_plan: dict[str, Any] | None,
+) -> dict[str, str]:
+    agent = agent_profile.get("agent", {}) if agent_profile else {}
+    if not isinstance(agent, dict):
+        agent = {}
+    agent_id = _first_text(
+        agent.get("id"),
+        capability_profile.get("agent_id") if capability_profile else None,
+        attack_plan.get("agent_id") if attack_plan else None,
+        "agent",
+    )
+    return {
+        "id": agent_id,
+        "name": _first_text(agent.get("name"), agent_id),
+        "adapter_kind": _first_text(
+            agent.get("adapter_kind"),
+            capability_profile.get("adapter_kind") if capability_profile else None,
+            "unknown",
+        ),
+    }
+
+
+def _onboarding_level(
+    agent_profile: dict[str, Any] | None,
+    capability_profile: dict[str, Any] | None,
+    attack_plan: dict[str, Any] | None,
+) -> int:
+    agent = agent_profile.get("agent", {}) if agent_profile else {}
+    if not isinstance(agent, dict):
+        agent = {}
+    return _safe_int(
+        agent.get("onboarding_level"),
+        capability_profile.get("onboarding_level") if capability_profile else None,
+        attack_plan.get("onboarding_level") if attack_plan else None,
+    )
+
+
+def _capability_map(capability_profile: dict[str, Any] | None) -> dict[str, bool]:
+    capabilities = capability_profile.get("capabilities", {}) if capability_profile else {}
+    if not isinstance(capabilities, dict):
+        return {}
+    return {str(name): bool(enabled) for name, enabled in capabilities.items()}
+
+
+def _capability_rows(capabilities: dict[str, bool]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": name,
+            "label": _humanize_key(name),
+            "enabled": enabled,
+        }
+        for name, enabled in capabilities.items()
+    ]
+
+
+def _category_rows(
+    attack_plan: dict[str, Any] | None,
+    generated_attacks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    categories = attack_plan.get("categories", []) if attack_plan else []
+    rows: list[dict[str, Any]] = []
+    if isinstance(categories, list):
+        for category in categories:
+            if not isinstance(category, dict):
+                continue
+            attack_ids = _string_list(category.get("attack_ids"))
+            rows.append(
+                {
+                    "name": _first_text(category.get("name"), "Generated"),
+                    "count": _safe_int(category.get("count"), len(attack_ids)),
+                    "attack_ids": attack_ids,
+                }
+            )
+    if rows:
+        return rows
+    if generated_attacks:
+        return [
+            {
+                "name": "Generated",
+                "count": len(generated_attacks),
+                "attack_ids": [
+                    str(attack.get("id"))
+                    for attack in generated_attacks
+                    if isinstance(attack, dict) and attack.get("id")
+                ],
+            }
+        ]
+    return []
+
+
+def _generated_attack_ids(
+    attack_plan: dict[str, Any] | None,
+    generated_attacks: list[dict[str, Any]],
+) -> list[str]:
+    ids: list[str] = []
+    for category in _category_rows(attack_plan, generated_attacks):
+        ids.extend(category["attack_ids"])
+    if not ids:
+        ids.extend(
+            str(attack.get("id"))
+            for attack in generated_attacks
+            if isinstance(attack, dict) and attack.get("id")
+        )
+    return _dedupe(ids)
+
+
+def _generated_attack_pack_path(
+    root: Path,
+    attack_plan: dict[str, Any] | None,
+) -> Path | None:
+    if not attack_plan:
+        return None
+    value = attack_plan.get("generated_attack_pack")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = Path(value.strip())
+    return path if path.is_absolute() else root / path
+
+
+def _load_generated_attacks(path: Path | None) -> list[dict[str, Any]]:
+    if not path:
+        return []
+    data = _load_json(path)
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _existing_plan_artifacts(paths: dict[str, Path], root: Path) -> list[dict[str, str]]:
+    labels = {
+        "agent_profile": "Agent profile",
+        "capability_profile": "Capability profile",
+        "attack_plan": "Attack plan",
+        "attack_plan_markdown": "Attack plan markdown",
+    }
+    return [
+        {"label": labels[key], "path": _display_path(path, root)}
+        for key, path in paths.items()
+        if path.exists()
+    ]
 
 
 def _render_attack_suite(
@@ -244,10 +570,17 @@ def _latest_patch() -> tuple[dict[str, Any] | None, str]:
     summaries = sorted(PATCHES_ROOT.glob("*_summary.json"), key=lambda path: path.stat().st_mtime)
     if not summaries:
         return None, ""
-    summary = _load_json(summaries[-1])
+    summary = _load_json_object(summaries[-1])
+    if not summary:
+        return None, ""
     diff_path = Path(str(summary.get("diff_path", "")))
     diff = diff_path.read_text(encoding="utf-8") if diff_path.exists() else ""
     return summary, diff
+
+
+def _load_json_object(path: Path) -> dict[str, Any] | None:
+    data = _load_json(path)
+    return data if isinstance(data, dict) else None
 
 
 def _load_json(path: Path) -> dict[str, Any] | list[Any] | None:
@@ -255,6 +588,59 @@ def _load_json(path: Path) -> dict[str, Any] | list[Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _load_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+
+
+def _display_path(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _safe_int(*values: Any) -> int:
+    for value in values:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            return int(value.strip())
+    return 0
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item)]
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        deduped.append(value)
+        seen.add(value)
+    return deduped
+
+
+def _humanize_key(value: str) -> str:
+    return value.replace("_", " ").strip().capitalize()
 
 
 if __name__ == "__main__":

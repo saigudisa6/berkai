@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .attacks import get_attack
+from .attacks import Attack, get_attack
 from .config import GUARDRAIL_KEYS, dump_guardrails, load_guardrails, merge_guardrail_patch
 from .patcher import apply_patch_document, load_fixture_patch, make_diff, parse_json_document
 from .paths import (
@@ -27,6 +27,11 @@ SUPPORTED_ASSERTION_TYPES = {
     "no_tool_call",
 }
 TOOL_ASSERTION_TYPES = {"blocked_before_execution", "no_tool_call"}
+
+
+TRACE_EXPECTED_AFTER_PATCH = (
+    "Generated/custom remediation should block the observed unsafe behavior."
+)
 
 
 @dataclass
@@ -143,21 +148,26 @@ class ClaudeCodeRemediator:
                 return claude_attempt
 
         if allow_fixture_fallback:
-            return self._fixture_result(
-                attack_id=attack_id,
-                run_id=run_id,
-                guardrails_path=guardrails_path,
-                before_guardrails=before_guardrails,
-                before_regressions=before_regressions,
-                apply=apply,
-                fixture_fallback_used=True,
-                prompt_path=claude_attempt.prompt_path if claude_attempt else None,
-                raw_output_path=claude_attempt.raw_output_path if claude_attempt else None,
-                proposal_path=claude_attempt.proposal_path if claude_attempt else None,
-                validation_error_path=(
-                    claude_attempt.validation_error_path if claude_attempt else None
-                ),
-            )
+            try:
+                return self._fixture_result(
+                    attack_id=attack_id,
+                    run_id=run_id,
+                    guardrails_path=guardrails_path,
+                    before_guardrails=before_guardrails,
+                    before_regressions=before_regressions,
+                    apply=apply,
+                    fixture_fallback_used=True,
+                    prompt_path=claude_attempt.prompt_path if claude_attempt else None,
+                    raw_output_path=claude_attempt.raw_output_path if claude_attempt else None,
+                    proposal_path=claude_attempt.proposal_path if claude_attempt else None,
+                    validation_error_path=(
+                        claude_attempt.validation_error_path if claude_attempt else None
+                    ),
+                )
+            except KeyError:
+                if claude_attempt is not None:
+                    return claude_attempt
+                raise
 
     def _claude_code_unavailable_result(
         self,
@@ -763,7 +773,7 @@ def build_claude_proposal_prompt(
     run_id: str,
     trace_path: Path,
 ) -> str:
-    attack = get_attack(attack_id)
+    attack = _attack_context_for_prompt(attack_id, trace)
     key_events = _key_trace_events(trace)
     schema = {
         "failure_analysis": "string",
@@ -807,6 +817,8 @@ Inputs:
 ATTACK_ID: {attack.id}
 ATTACK_NAME: {attack.name}
 ATTACK_PAYLOAD: {attack.task}
+ATTACK_SETUP: {attack.setup}
+ATTACK_SOURCE: {attack.source}
 RUN_ID: {run_id}
 TRACE_PATH: {trace_path.as_posix()}
 FAILURE_REASON: {trace.get('outcome_reason', 'unknown')}
@@ -833,7 +845,7 @@ def build_claude_prompt(
     summary_path: Path,
     trace_path: Path,
 ) -> str:
-    attack = get_attack(attack_id)
+    attack = _attack_context_for_prompt(attack_id, trace)
     key_events = _key_trace_events(trace)
     return f"""You are Claude Code acting as a security engineer for RedTeamCI.
 
@@ -854,6 +866,9 @@ The fix must block dangerous tool calls before execution.
 Inputs:
 ATTACK_ID: {attack.id}
 ATTACK_NAME: {attack.name}
+ATTACK_PAYLOAD: {attack.task}
+ATTACK_SETUP: {attack.setup}
+ATTACK_SOURCE: {attack.source}
 RUN_ID: {run_id}
 TRACE_PATH: {trace_path.as_posix()}
 FAILURE_REASON: {trace.get('outcome_reason', 'unknown')}
@@ -871,6 +886,18 @@ Task:
 5. The patch should cause rerun to pass because guarded_tool_call blocks the dangerous action before execution.
 
 Return a concise summary of changed files."""
+
+
+def attack_context_from_trace(trace: dict[str, Any]) -> Attack:
+    attack_started = _first_attack_started_event(trace)
+    return Attack(
+        id=_required_trace_string(trace, "attack_id"),
+        name=_required_trace_string(trace, "attack_name"),
+        task=_required_trace_string(attack_started, "content"),
+        setup=_trace_string(attack_started, "setup") or "trace_metadata",
+        expected_after_patch=TRACE_EXPECTED_AFTER_PATCH,
+        source=_trace_string(attack_started, "source") or "trace",
+    )
 
 
 def validate_patch_document(document: Any) -> list[str]:
@@ -1058,6 +1085,34 @@ def _key_trace_events(trace: dict[str, Any]) -> list[dict[str, Any]]:
         if event.get("type") in useful_types:
             events.append(event)
     return events[-12:]
+
+
+def _attack_context_for_prompt(attack_id: str, trace: dict[str, Any]) -> Attack:
+    try:
+        return get_attack(attack_id)
+    except KeyError:
+        return attack_context_from_trace(trace)
+
+
+def _first_attack_started_event(trace: dict[str, Any]) -> dict[str, Any]:
+    for event in trace.get("events", []):
+        if isinstance(event, dict) and event.get("type") == "attack_started":
+            return event
+    raise ValueError("trace is missing attack_started event metadata")
+
+
+def _required_trace_string(source: dict[str, Any], key: str) -> str:
+    value = _trace_string(source, key)
+    if value:
+        return value
+    raise ValueError(f"trace metadata field {key!r} is required")
+
+
+def _trace_string(source: dict[str, Any], key: str) -> str | None:
+    value = source.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def _combined_diff(

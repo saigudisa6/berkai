@@ -8,7 +8,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .adapters import DEFAULT_HTTP_DEMO_URL, AgentConfig, check_http_agent
+from .adapters import (
+    DEFAULT_HTTP_DEMO_URL,
+    AgentConfig,
+    check_cli_agent_config,
+    check_http_agent,
+)
 from .claude_code import (
     ClaudeCodeRemediator,
     build_claude_prompt,
@@ -16,6 +21,7 @@ from .claude_code import (
     write_claude_prompt_artifact,
 )
 from .config import load_manifest
+from .generator import DEFAULT_PLAN_OUTPUT_DIR, write_plan_outputs
 from .github_annotations import ANNOTATION_LEVELS, render_github_annotations
 from .github_summary import DEFAULT_GITHUB_SUMMARY_PATH, write_github_summary
 from .patcher import load_trace_for_attack
@@ -77,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
         return github_annotations_command(args)
     if args.command == "trace":
         return trace_command(args)
+    if args.command == "plan":
+        return plan_command(args)
 
     parser.print_help()
     return 1
@@ -216,6 +224,12 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument("--run-id")
     trace.add_argument("--traces-root", default=str(TRACES_ROOT))
     trace.add_argument("--json", action="store_true")
+
+    plan = subparsers.add_parser("plan")
+    plan.add_argument("--config", default=str(DEFAULT_MANIFEST_PATH))
+    plan.add_argument("--output-dir", default=str(DEFAULT_PLAN_OUTPUT_DIR))
+    plan.add_argument("--attack-pack")
+    plan.add_argument("--json", action="store_true")
 
     return parser
 
@@ -645,6 +659,22 @@ def trace_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def plan_command(args: argparse.Namespace) -> int:
+    paths = write_plan_outputs(
+        config_path=args.config,
+        output_dir=args.output_dir,
+        attack_pack_path=args.attack_pack,
+    )
+    if args.json:
+        print(json.dumps({key: str(path) for key, path in paths.items()}, indent=2))
+        return 0
+
+    print("RedTeamCI generated attack plan")
+    for label, path in paths.items():
+        print(f"{label}: {path}")
+    return 0
+
+
 def print_run_report(
     report: RunReport,
     *,
@@ -661,6 +691,8 @@ def print_run_report(
         print(f"  {result.summary}")
         if result.source == "generated":
             print("  Source: generated regression")
+        elif result.source == "generated_plan":
+            print("  Source: generated attack plan")
         elif result.source != "builtin":
             print(f"  Source: {result.source}")
         if result.assertion_failures:
@@ -736,7 +768,9 @@ def _configured_optional_path(
     manifest: dict[str, str],
     key: str,
 ) -> str | None:
-    value = explicit or manifest.get(key)
+    if explicit:
+        return explicit
+    value = manifest.get(key)
     if not value:
         return None
     path = Path(value)
@@ -751,7 +785,63 @@ def _agent_config(args: argparse.Namespace, manifest: dict[str, str]) -> AgentCo
         return AgentConfig(kind="http", url=args.agent_url or DEFAULT_HTTP_DEMO_URL)
     if selected == "http":
         return AgentConfig(kind="http", url=args.agent_url or manifest.get("agent_url"))
+    if selected == "cli":
+        return AgentConfig(
+            kind="cli",
+            command=_manifest_command(manifest, "agent_command"),
+            cwd=_manifest_path(manifest.get("agent_cwd"), manifest),
+            timeout=_manifest_int(manifest, "agent_timeout", 10),
+            max_stdout_bytes=_manifest_int(manifest, "agent_max_stdout_bytes", 64 * 1024),
+            max_stderr_bytes=_manifest_int(manifest, "agent_max_stderr_bytes", 16 * 1024),
+        )
+    if selected == "repo":
+        return AgentConfig(
+            kind="repo",
+            command=(
+                _manifest_command(manifest, "agent_entrypoint")
+                or _manifest_command(manifest, "agent_command")
+            ),
+            cwd=_manifest_path(manifest.get("agent_cwd"), manifest),
+            timeout=_manifest_int(manifest, "agent_timeout", 10),
+            max_stdout_bytes=_manifest_int(manifest, "agent_max_stdout_bytes", 64 * 1024),
+            max_stderr_bytes=_manifest_int(manifest, "agent_max_stderr_bytes", 16 * 1024),
+        )
     return AgentConfig(kind="builtin")
+
+
+def _manifest_command(manifest: dict[str, str], key: str) -> str | list[str] | None:
+    raw = manifest.get(key)
+    if not raw:
+        return None
+    stripped = raw.strip()
+    if stripped.startswith("["):
+        try:
+            value = json.loads(stripped)
+        except json.JSONDecodeError:
+            return raw
+        if isinstance(value, list):
+            return [str(item) for item in value]
+    return raw
+
+
+def _manifest_path(value: str | None, manifest: dict[str, str]) -> str | None:
+    if not value:
+        return None
+    path = Path(value)
+    if path.is_absolute():
+        return str(path)
+    return str(Path(manifest.get("_base_dir", ".")) / path)
+
+
+def _manifest_int(manifest: dict[str, str], key: str, default: int) -> int:
+    raw = manifest.get(key)
+    if raw is None:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _doctor_checks(args: argparse.Namespace) -> list[tuple[bool, str]]:
@@ -856,6 +946,9 @@ def _doctor_checks(args: argparse.Namespace) -> list[tuple[bool, str]]:
         checks.append((True, "Agent configured: builtin"))
     elif agent_config.kind == "http":
         ok, message = check_http_agent(agent_config.url or DEFAULT_HTTP_DEMO_URL)
+        checks.append((ok, message))
+    elif agent_config.kind in {"cli", "repo"}:
+        ok, message = check_cli_agent_config(agent_config)
         checks.append((ok, message))
     else:
         checks.append((False, f"Unsupported agent: {agent_config.kind}"))

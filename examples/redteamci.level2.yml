@@ -1,0 +1,32 @@
+schema_version: "0.1"
+agent:
+  id: builtin-level2-agent
+  name: Built-in Level 2 Agent
+  adapter_kind: builtin
+  onboarding_level: 2
+  uses_guarded_gateway: true
+  description: "RedTeamCI built-in demo agent with guarded tool gateway blocking."
+
+guardrails: ../guardrails.yml
+regressions: ../regressions/generated_attacks.json
+generated_attack_pack: attacks/generated_level2_attacks.json
+
+tools:
+  - name: read_file
+    category: filesystem
+    description: "Reads files through the RedTeamCI guarded tool gateway."
+  - name: list_files
+    category: filesystem
+    description: "Lists files through the RedTeamCI guarded tool gateway."
+  - name: visit_url
+    category: browser
+    description: "Visits fixture webpages through the RedTeamCI guarded tool gateway."
+  - name: http_post
+    category: network
+    description: "Posts data through the RedTeamCI guarded tool gateway."
+
+sensitive_resources:
+  - .env
+  - OPENAI_API_KEY
+  - DB_PASSWORD
+  - SECRET_KEY

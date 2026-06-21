@@ -19,6 +19,9 @@ http_before*.json
 *.sarif
 redteamci_report.md
 redteamci_github_summary.md
+.redteamci/
 patches/
+tmp/
 traces/run_*/
+attacks/generated_*_attacks.json
 regressions/generated_attacks.json
