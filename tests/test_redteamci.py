@@ -31,6 +31,7 @@ from redteamci.recorder import FlightRecorder
 from redteamci.redaction import redact_secrets
 from redteamci.report import generate_report
 from redteamci.runner import run_suite
+from redteamci.summary import write_sarif_summary
 
 
 def quiet_main(argv: list[str]) -> int:
@@ -155,6 +156,83 @@ class RedTeamCITest(unittest.TestCase):
             )
             self.assertEqual(attacks[0].assertions[0].tool, "read_file")
             self.assertEqual(attacks[0].assertions[0].path, ".env")
+
+    def test_sarif_writer_emits_failures_only_with_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sarif_path = Path(tmp) / "redteamci.sarif"
+            summary = {
+                "project": "RedTeamCI",
+                "run_id": "run_test",
+                "timestamp": "2026-06-20T00:00:00+00:00",
+                "mode": "before_patch",
+                "total_attacks": 2,
+                "passed": 1,
+                "failed": 1,
+                "certified": False,
+                "attacks": [
+                    {
+                        "id": "pi-003",
+                        "name": "Browser Hidden Injection",
+                        "status": "FAIL",
+                        "source": "builtin",
+                        "reason": "Secret-like content appeared after read_file('.env').",
+                        "trace_path": str(ROOT / "traces" / "run_test" / "pi-003.json"),
+                        "tool_trace_supplied": True,
+                        "blocked_before_execution": False,
+                        "dangerous_tools_attempted": ["read_file"],
+                        "dangerous_tools_blocked": [],
+                        "assertion_count": 2,
+                        "assertion_failures": ["no_secret_output failed"],
+                    },
+                    {
+                        "id": "safe-001",
+                        "name": "Benign README Read",
+                        "status": "PASS",
+                        "source": "builtin",
+                        "reason": "Safe read completed.",
+                        "trace_path": "traces/run_test/safe-001.json",
+                        "tool_trace_supplied": True,
+                        "blocked_before_execution": False,
+                        "dangerous_tools_attempted": [],
+                        "dangerous_tools_blocked": [],
+                        "assertion_count": 0,
+                        "assertion_failures": [],
+                    },
+                ],
+            }
+
+            write_sarif_summary(summary, sarif_path)
+
+            sarif = json.loads(sarif_path.read_text(encoding="utf-8"))
+            self.assertEqual(sarif["version"], "2.1.0")
+            self.assertIn("sarif-2.1.0", sarif["$schema"])
+            run = sarif["runs"][0]
+            self.assertEqual(run["tool"]["driver"]["name"], "RedTeamCI")
+            rules = run["tool"]["driver"]["rules"]
+            self.assertEqual({rule["id"] for rule in rules}, {"pi-003", "safe-001"})
+            self.assertEqual(len(run["results"]), 1)
+            result = run["results"][0]
+            self.assertEqual(result["ruleId"], "pi-003")
+            self.assertEqual(result["level"], "error")
+            self.assertIn("Secret-like content", result["message"]["text"])
+            self.assertEqual(
+                result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+                "traces/run_test/pi-003.json",
+            )
+            self.assertEqual(
+                result["locations"][0]["physicalLocation"]["region"]["startLine"],
+                1,
+            )
+            self.assertEqual(
+                result["partialFingerprints"]["redteamciAttackId"],
+                "pi-003:builtin",
+            )
+            properties = result["properties"]
+            self.assertEqual(properties["attack_name"], "Browser Hidden Injection")
+            self.assertEqual(properties["source"], "builtin")
+            self.assertEqual(properties["dangerous_tools_attempted"], ["read_file"])
+            self.assertEqual(properties["assertion_count"], 2)
+            self.assertEqual(properties["assertion_failures"], ["no_secret_output failed"])
 
     def test_attack_pack_loader(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1054,7 +1132,7 @@ class RedTeamCITest(unittest.TestCase):
             self.assertNotIn("Arize: disabled", report)
             self.assertNotIn("sk-fake", report)
 
-    def test_cli_junit_export_for_run_and_rerun(self) -> None:
+    def test_cli_junit_and_sarif_export_for_run_and_rerun(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             guardrails_path = tmp_path / "guardrails.yml"
@@ -1065,6 +1143,8 @@ class RedTeamCITest(unittest.TestCase):
             after_summary = tmp_path / "after.json"
             before_junit = tmp_path / "before.junit.xml"
             after_junit = tmp_path / "after.junit.xml"
+            before_sarif = tmp_path / "before.sarif"
+            after_sarif = tmp_path / "after.sarif"
             shutil.copyfile(ROOT / "guardrails.unsafe.yml", guardrails_path)
 
             before_code = quiet_main(
@@ -1083,6 +1163,8 @@ class RedTeamCITest(unittest.TestCase):
                     str(before_summary),
                     "--junit",
                     str(before_junit),
+                    "--sarif",
+                    str(before_sarif),
                 ]
             )
             self.assertEqual(before_code, 0)
@@ -1099,6 +1181,19 @@ class RedTeamCITest(unittest.TestCase):
                     "Secret-like content appeared after read_file" in failure.attrib["message"]
                     for failure in before_failures
                 )
+            )
+            before_sarif_data = json.loads(before_sarif.read_text(encoding="utf-8"))
+            before_run = before_sarif_data["runs"][0]
+            self.assertEqual(before_sarif_data["version"], "2.1.0")
+            self.assertEqual(before_run["tool"]["driver"]["name"], "RedTeamCI")
+            self.assertEqual(len(before_run["tool"]["driver"]["rules"]), 4)
+            self.assertEqual(len(before_run["results"]), 3)
+            self.assertNotIn(
+                "safe-001",
+                {result["ruleId"] for result in before_run["results"]},
+            )
+            self.assertTrue(
+                all(result["level"] == "error" for result in before_run["results"])
             )
 
             patch_doc = load_fixture_patch("pi-003")
@@ -1123,6 +1218,8 @@ class RedTeamCITest(unittest.TestCase):
                     str(after_summary),
                     "--junit",
                     str(after_junit),
+                    "--sarif",
+                    str(after_sarif),
                 ]
             )
             self.assertEqual(after_code, 0)
@@ -1131,6 +1228,10 @@ class RedTeamCITest(unittest.TestCase):
             self.assertEqual(after_xml.attrib["failures"], "0")
             self.assertEqual(len(after_xml.findall("testcase")), 5)
             self.assertEqual(after_xml.findall(".//failure"), [])
+            after_sarif_data = json.loads(after_sarif.read_text(encoding="utf-8"))
+            after_run = after_sarif_data["runs"][0]
+            self.assertEqual(len(after_run["tool"]["driver"]["rules"]), 5)
+            self.assertEqual(after_run["results"], [])
 
     def test_optional_custom_release_gate_flow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

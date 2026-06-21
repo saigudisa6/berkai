@@ -16,6 +16,7 @@ custom_before.json
 custom_after.json
 http_before*.json
 *.junit.xml
+*.sarif
 redteamci_report.md
 patches/
 traces/run_*/

@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from .paths import ROOT
+
 
 def build_run_summary(
     *,
@@ -65,6 +67,39 @@ def write_summary(summary: dict[str, Any], path: str | Path) -> None:
 
 def load_summary(path: str | Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def write_sarif_summary(summary: dict[str, Any], path: str | Path) -> None:
+    attacks = list(summary.get("attacks", []))
+    sarif = {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "RedTeamCI",
+                        "rules": [_sarif_rule(attack) for attack in attacks],
+                    }
+                },
+                "results": [
+                    _sarif_result(attack)
+                    for attack in attacks
+                    if attack.get("status") == "FAIL"
+                ],
+                "properties": {
+                    "project": summary.get("project", "RedTeamCI"),
+                    "run_id": summary.get("run_id", ""),
+                    "mode": summary.get("mode", ""),
+                    "certified": summary.get("certified", False),
+                    "total_attacks": summary.get("total_attacks", 0),
+                    "failed": summary.get("failed", 0),
+                    "passed": summary.get("passed", 0),
+                },
+            }
+        ],
+    }
+    Path(path).write_text(json.dumps(sarif, indent=2), encoding="utf-8")
 
 
 def write_junit_summary(summary: dict[str, Any], path: str | Path) -> None:
@@ -162,6 +197,108 @@ def _junit_failure_text(attack: dict[str, Any]) -> str:
         lines.append("Assertion failures:")
         lines.extend(f"- {failure}" for failure in assertion_failures)
     return "\n".join(lines)
+
+
+def _sarif_rule(attack: dict[str, Any]) -> dict[str, Any]:
+    attack_id = _sarif_attack_id(attack)
+    attack_name = _sarif_attack_name(attack)
+    source = str(attack.get("source") or "unknown")
+    return {
+        "id": attack_id,
+        "name": attack_name,
+        "shortDescription": {"text": attack_name},
+        "fullDescription": {
+            "text": f"RedTeamCI attack {attack_id} from {source}.",
+        },
+        "properties": _sarif_attack_properties(attack),
+    }
+
+
+def _sarif_result(attack: dict[str, Any]) -> dict[str, Any]:
+    reason = str(attack.get("reason") or f"{_sarif_attack_name(attack)} failed")
+    result = {
+        "ruleId": _sarif_attack_id(attack),
+        "level": "error",
+        "message": {"text": reason},
+        "partialFingerprints": {
+            "redteamciAttackId": f"{_sarif_attack_id(attack)}:{attack.get('source') or 'unknown'}",
+        },
+        "properties": _sarif_attack_properties(attack),
+    }
+    location = _sarif_location(attack.get("trace_path"))
+    if location:
+        result["locations"] = [location]
+    return result
+
+
+def _sarif_location(trace_path: Any) -> dict[str, Any] | None:
+    uri = _sarif_trace_uri(trace_path)
+    if not uri:
+        return None
+    return {
+        "physicalLocation": {
+            "artifactLocation": {
+                "uri": uri,
+            },
+            "region": {
+                "startLine": 1,
+            },
+        },
+    }
+
+
+def _sarif_trace_uri(trace_path: Any) -> str:
+    if not trace_path:
+        return ""
+    path = Path(str(trace_path))
+    if path.is_absolute():
+        for base in [ROOT, Path.cwd()]:
+            try:
+                return path.resolve().relative_to(base.resolve()).as_posix()
+            except (OSError, ValueError):
+                continue
+        return path.as_posix()
+    return path.as_posix()
+
+
+def _sarif_attack_properties(attack: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "attack_id": _sarif_attack_id(attack),
+        "attack_name": _sarif_attack_name(attack),
+        "source": str(attack.get("source") or "unknown"),
+        "status": str(attack.get("status") or "unknown"),
+        "trace_path": str(attack.get("trace_path") or ""),
+        "tool_trace_supplied": bool(attack.get("tool_trace_supplied", False)),
+        "blocked_before_execution": bool(
+            attack.get("blocked_before_execution", False)
+        ),
+        "dangerous_tools_attempted": _sarif_list(
+            attack.get("dangerous_tools_attempted")
+        ),
+        "dangerous_tools_blocked": _sarif_list(attack.get("dangerous_tools_blocked")),
+        "assertion_count": _sarif_int(attack.get("assertion_count", 0)),
+        "assertion_failures": _sarif_list(attack.get("assertion_failures")),
+    }
+
+
+def _sarif_attack_id(attack: dict[str, Any]) -> str:
+    return str(attack.get("id") or "unknown")
+
+
+def _sarif_attack_name(attack: dict[str, Any]) -> str:
+    attack_id = _sarif_attack_id(attack)
+    return str(attack.get("name") or attack_id)
+
+
+def _sarif_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _sarif_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _junit_token(value: str) -> str:

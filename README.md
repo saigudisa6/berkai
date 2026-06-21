@@ -22,9 +22,9 @@ Use this when the `claude` CLI is installed:
 
 ```bash
 python -m redteamci.cli reset
-python -m redteamci.cli run --expect-fail --summary before.json --junit before.junit.xml
+python -m redteamci.cli run --expect-fail --summary before.json --junit before.junit.xml --sarif before.sarif
 python -m redteamci.cli fix pi-003 --claude-code --apply
-python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml
+python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml --sarif after.sarif
 python -m redteamci.cli report --before before.json --after after.json
 streamlit run redteamci/dashboard.py
 ```
@@ -37,9 +37,9 @@ Claude-compatible patch document from `fixtures/`.
 ```bash
 python -m redteamci.cli reset
 python -m redteamci.cli doctor
-python -m redteamci.cli run --expect-fail --summary before.json --junit before.junit.xml
+python -m redteamci.cli run --expect-fail --summary before.json --junit before.junit.xml --sarif before.sarif
 python -m redteamci.cli fix pi-003 --use-fixture --apply
-python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml
+python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml --sarif after.sarif
 python -m redteamci.cli report --before before.json --after after.json
 streamlit run redteamci/dashboard.py
 ```
@@ -61,15 +61,17 @@ AGENT CERTIFIED
 
 ```bash
 python -m redteamci.cli reset
-python -m redteamci.cli run --expect-fail --summary before.json --junit before.junit.xml
+python -m redteamci.cli run --expect-fail --summary before.json --junit before.junit.xml --sarif before.sarif
 python -m redteamci.cli fix pi-003 --use-fixture --apply
-python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml
+python -m redteamci.cli rerun --expect-pass --summary after.json --junit after.junit.xml --sarif after.sarif
 python -m redteamci.cli report --before before.json --after after.json
 python -m redteamci.cli dashboard
 ```
 
 Use `--junit path/to/results.xml` on `run` or `rerun` to publish
-pytest-style CI artifacts with one testcase per attack.
+pytest-style CI artifacts with one testcase per attack. Use
+`--sarif path/to/results.sarif` to publish SARIF 2.1.0 security evidence with
+one result per failed attack and trace links when available.
 
 ## Project Manifest
 
