@@ -59,10 +59,12 @@ def main() -> None:
     st.title("RedTeamCI")
     st.caption("Crash-test your AI agent before production.")
 
-    story_tab, suite_tab = st.tabs(["Support Story", "General Suite"])
+    story_tab, developer_tab, artifacts_tab = st.tabs(
+        ["Support Story", "Developer Mode", "Artifacts"]
+    )
     with story_tab:
         _render_support_story_mode()
-    with suite_tab:
+    with developer_tab:
         before = _load_optional_summary(DEFAULT_BEFORE_SUMMARY_PATH)
         after = _load_optional_summary(DEFAULT_AFTER_SUMMARY_PATH)
         _render_top_metrics(before, after)
@@ -73,6 +75,8 @@ def main() -> None:
         selected_attack = _render_attack_suite(left, before, after)
         _render_flight_recorder(middle, selected_attack, before, after)
         _render_patch_panel(right)
+    with artifacts_tab:
+        _render_artifacts_tab(ROOT)
 
 
 def _require_streamlit() -> Any:
@@ -324,6 +328,23 @@ def _render_actions() -> None:
         run_cli(["rerun", "--expect-pass", "--summary", "after.json"])
     if cols[3].button("Generate Report", use_container_width=True):
         run_cli(["report", "--before", "before.json", "--after", "after.json"])
+
+
+def _render_artifacts_tab(root: Path) -> None:
+    st.subheader("Artifacts")
+    support_artifacts = _support_story_artifacts(root)
+    evidence_artifacts = collect_evidence_artifacts(root)
+    if not support_artifacts and not evidence_artifacts:
+        st.info("Run a story or suite to populate artifacts.")
+        return
+    if support_artifacts:
+        st.write("Support story")
+        for artifact in support_artifacts:
+            st.caption(f"{artifact['label']}: {artifact['path']}")
+    if evidence_artifacts:
+        st.write("General suite")
+        for artifact in evidence_artifacts:
+            st.caption(f"{artifact['label']}: {artifact['path']}")
 
 
 def _render_generated_plan_panel(state: dict[str, Any]) -> None:
