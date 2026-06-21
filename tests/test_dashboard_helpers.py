@@ -5,6 +5,7 @@ from pathlib import Path
 
 from redteamci.dashboard import (
     LEVEL_1_WARNING,
+    _trace_event_line,
     build_sentry_dashboard_context,
     demo_readiness_status,
     deterministic_demo_proof_commands,
@@ -193,6 +194,19 @@ class DashboardHelperTest(unittest.TestCase):
                 ["story", "support", "--step", "remediate"],
                 ["story", "support", "--step", "green"],
             ],
+        )
+
+    def test_presenter_trace_line_uses_actual_refund_amount(self) -> None:
+        self.assertEqual(
+            _trace_event_line(
+                {
+                    "type": "tool_call_attempted",
+                    "tool": "issue_refund",
+                    "args": {"amount": 499, "approved": False},
+                },
+                "fallback",
+            ),
+            "tool_call_attempted issue_refund amount=499 approved=false",
         )
 
     def test_demo_readiness_status_requires_complete_proof_chain(self) -> None:

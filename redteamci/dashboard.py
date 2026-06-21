@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from html import escape
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -73,17 +74,20 @@ PRESENTER_ATTACKS = [
 ]
 PRESENTER_CAPABILITIES = ["Refunds", "Email", "Customer Data", "PII"]
 DETERMINISTIC_DEMO_PROOF_STEPS = ["prepare", "plan", "red", "remediate", "green"]
+PRESENTER_REFUND_AMOUNT = 499
 
 
 def main() -> None:
     streamlit = _require_streamlit()
     streamlit.set_page_config(page_title="RedTeamCI", layout="wide")
 
-    presenter_tab, developer_tab, artifacts_tab = st.tabs(
-        ["Presenter Mode", "Developer Mode", "Artifacts"]
+    modern_presenter_tab, presenter_tab, developer_tab, artifacts_tab = st.tabs(
+        ["Modern Presenter Mode", "Presenter Mode", "Developer Mode", "Artifacts"]
     )
-    with presenter_tab:
+    with modern_presenter_tab:
         _render_presenter_mode()
+    with presenter_tab:
+        _render_classic_presenter_mode()
     with developer_tab:
         st.subheader("Support Story Deep Inspection")
         _render_support_story_mode()
@@ -107,6 +111,267 @@ def _require_streamlit() -> Any:
     if st is None:
         raise RuntimeError("Streamlit is required to launch the RedTeamCI dashboard.")
     return st
+
+
+def _inject_presenter_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .rt-hero {
+          background: #ffffff;
+          border: 1px solid #dce3ed;
+          border-left: 5px solid #2563eb;
+          border-radius: 8px;
+          padding: 24px 28px;
+          box-shadow: 0 14px 36px rgba(15, 23, 42, 0.07);
+          margin-bottom: 14px;
+        }
+        .rt-eyebrow {
+          color: #2563eb;
+          font-size: 0.78rem;
+          font-weight: 800;
+          letter-spacing: 0;
+          text-transform: uppercase;
+          margin-bottom: 6px;
+        }
+        .rt-title {
+          font-size: clamp(2.1rem, 4vw, 4rem);
+          line-height: 1;
+          font-weight: 850;
+          letter-spacing: 0;
+          margin: 0;
+          color: #0f172a;
+        }
+        .rt-headline {
+          font-size: 1.1rem;
+          color: #334155;
+          margin-top: 8px;
+          max-width: 940px;
+        }
+        .rt-script {
+          margin-top: 14px;
+          color: #475569;
+          max-width: 980px;
+        }
+        .rt-status-grid,
+        .rt-action-note,
+        .rt-stepper,
+        .rt-card-grid,
+        .rt-proof-grid {
+          display: grid;
+          gap: 10px;
+        }
+        .rt-status-grid {
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          margin: 12px 0 16px;
+        }
+        .rt-status-card,
+        .rt-proof-tile,
+        .rt-attack-card,
+        .rt-panel,
+        .rt-lane {
+          background: #ffffff;
+          border: 1px solid #dce3ed;
+          border-radius: 8px;
+          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+        }
+        .rt-status-card {
+          padding: 12px 14px;
+          min-height: 82px;
+        }
+        .rt-label {
+          color: #64748b;
+          font-size: 0.76rem;
+          font-weight: 750;
+          letter-spacing: 0;
+          text-transform: uppercase;
+        }
+        .rt-value {
+          margin-top: 6px;
+          color: #0f172a;
+          font-size: 1rem;
+          font-weight: 800;
+          overflow-wrap: anywhere;
+        }
+        .rt-card-good { border-top: 4px solid #0f766e; }
+        .rt-card-bad { border-top: 4px solid #b42318; }
+        .rt-card-warn { border-top: 4px solid #b54708; }
+        .rt-card-muted { border-top: 4px solid #64748b; }
+        .rt-alert {
+          border-radius: 8px;
+          padding: 12px 14px;
+          margin: 8px 0 16px;
+          font-weight: 650;
+        }
+        .rt-alert-good {
+          background: #ecfdf5;
+          border: 1px solid #a7f3d0;
+          color: #065f46;
+        }
+        .rt-alert-warn {
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          color: #92400e;
+        }
+        .rt-alert-muted {
+          background: #eff6ff;
+          border: 1px solid #bfdbfe;
+          color: #1e3a8a;
+        }
+        .rt-action-note {
+          grid-template-columns: minmax(0, 1fr);
+          margin: 8px 0 10px;
+          color: #475569;
+        }
+        .rt-stepper {
+          grid-template-columns: repeat(7, minmax(0, 1fr));
+          margin: 16px 0 18px;
+        }
+        .rt-step {
+          background: #eaf0f8;
+          border: 1px solid #d2dbe8;
+          color: #24324a;
+          border-radius: 8px;
+          padding: 9px 10px;
+          text-align: center;
+          font-size: 0.82rem;
+          font-weight: 750;
+        }
+        .rt-panel {
+          padding: 18px;
+          min-height: 100%;
+        }
+        .rt-panel-title {
+          margin: 0 0 4px;
+          color: #0f172a;
+          font-size: 1.15rem;
+          font-weight: 830;
+        }
+        .rt-panel-subtitle {
+          color: #64748b;
+          margin-bottom: 12px;
+        }
+        .rt-chip-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 12px;
+        }
+        .rt-chip {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          background: #f1f5f9;
+          border: 1px solid #d8e0ea;
+          color: #1e293b;
+          padding: 6px 10px;
+          font-size: 0.84rem;
+          font-weight: 700;
+        }
+        .rt-card-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .rt-attack-card {
+          padding: 13px 14px;
+        }
+        .rt-attack-id {
+          color: #0f172a;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          font-weight: 850;
+          font-size: 0.88rem;
+          overflow-wrap: anywhere;
+        }
+        .rt-attack-name {
+          color: #475569;
+          margin-top: 5px;
+          min-height: 40px;
+        }
+        .rt-mini-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 10px;
+        }
+        .rt-pill {
+          border-radius: 999px;
+          padding: 4px 8px;
+          font-size: 0.72rem;
+          font-weight: 800;
+          background: #f1f5f9;
+          color: #334155;
+        }
+        .rt-pill-good { background: #dcfce7; color: #166534; }
+        .rt-pill-bad { background: #fee2e2; color: #991b1b; }
+        .rt-pill-warn { background: #fef3c7; color: #92400e; }
+        .rt-trace-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 14px;
+        }
+        .rt-lane {
+          padding: 16px;
+        }
+        .rt-lane-red { border-top: 4px solid #b42318; }
+        .rt-lane-green { border-top: 4px solid #0f766e; }
+        .rt-lane-title {
+          font-size: 0.82rem;
+          font-weight: 850;
+          color: #334155;
+          margin-bottom: 10px;
+          letter-spacing: 0;
+        }
+        .rt-event {
+          border-left: 3px solid #94a3b8;
+          padding: 8px 10px;
+          margin: 8px 0;
+          background: #f8fafc;
+          border-radius: 0 6px 6px 0;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          font-size: 0.85rem;
+          color: #172033;
+          overflow-wrap: anywhere;
+        }
+        .rt-event-bad { border-left-color: #b42318; background: #fff1f2; }
+        .rt-event-good { border-left-color: #0f766e; background: #ecfdf5; }
+        .rt-outcome {
+          margin-top: 10px;
+          padding: 9px 10px;
+          border-radius: 6px;
+          font-weight: 850;
+          text-align: center;
+        }
+        .rt-outcome-good { background: #dcfce7; color: #166534; }
+        .rt-outcome-bad { background: #fee2e2; color: #991b1b; }
+        .rt-proof-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+        .rt-proof-tile {
+          padding: 11px 12px;
+        }
+        .rt-proof-tile strong {
+          display: block;
+          color: #0f172a;
+          margin-bottom: 3px;
+        }
+        .rt-muted {
+          color: #64748b;
+        }
+        @media (max-width: 920px) {
+          .rt-status-grid,
+          .rt-stepper,
+          .rt-card-grid,
+          .rt-proof-grid,
+          .rt-trace-grid {
+            grid-template-columns: 1fr;
+          }
+          .rt-title {
+            font-size: 2.4rem;
+          }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _render_top_metrics(before: dict[str, Any] | None, after: dict[str, Any] | None) -> None:
@@ -135,6 +400,7 @@ def _render_demo_mode_actions() -> None:
 
 
 def _render_presenter_mode() -> None:
+    _inject_presenter_styles()
     state = load_support_story_dashboard_state(ROOT)
     readiness = demo_readiness_status(state)
 
@@ -165,34 +431,64 @@ def _render_presenter_header(
     state: dict[str, Any],
     readiness: dict[str, Any],
 ) -> None:
-    st.title("RedTeamCI")
-    st.subheader("Claude Code for AI-agent security gates")
-    st.caption("pytest for AI-agent security")
-
     github_connected = github_available()[0]
     sentry_context = build_sentry_dashboard_context(state)
-    status_cols = st.columns(5)
-    status_cols[0].metric("Scenario", "Customer Support Agent")
-    status_cols[1].metric("Proof", readiness["label"])
-    status_cols[2].metric("Release gate", "Local proof active")
-    status_cols[3].metric(
-        "GitHub CI",
-        "connected" if github_connected else "not connected",
+    st.markdown(
+        """
+        <div class="rt-hero">
+          <div class="rt-eyebrow">Claude Code for AI-agent security gates</div>
+          <h1 class="rt-title">RedTeamCI</h1>
+          <div class="rt-headline">pytest for AI-agent security</div>
+          <div class="rt-script">
+            Companies are shipping agents that can issue refunds, send email,
+            and touch customer data. Normal CI tests code. RedTeamCI tests
+            whether the agent uses its tools safely.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    status_cols[4].metric(
-        "Sentry",
-        "optional, configured" if sentry_context["configured"] else "optional, not configured",
+
+    status_cards = [
+        ("Scenario", "Customer Support Agent", "muted"),
+        ("Proof", readiness["label"], _readiness_tone(readiness)),
+        ("Release gate", "Local proof active", "good"),
+        ("GitHub CI", "connected" if github_connected else "not connected", "muted"),
+        (
+            "Sentry",
+            "optional, configured" if sentry_context["configured"] else "optional, not configured",
+            "good" if sentry_context["configured"] else "muted",
+        ),
+    ]
+    st.markdown(
+        '<div class="rt-status-grid">'
+        + "".join(_status_card_html(label, value, tone) for label, value, tone in status_cards)
+        + "</div>",
+        unsafe_allow_html=True,
     )
 
     if readiness["status"] == "ready":
-        st.success("DEMO READY: red exploit, remediation artifact, generated regression, and green proof are complete.")
+        _render_presenter_alert(
+            "good",
+            "DEMO READY: red exploit, remediation artifact, generated regression, and green proof are complete.",
+        )
     elif readiness["status"] == "partial":
-        st.warning("INCOMPLETE: proof artifacts exist, but the full certification chain is not complete yet.")
+        _render_presenter_alert(
+            "warn",
+            "INCOMPLETE: proof artifacts exist, but the full certification chain is not complete yet.",
+        )
     else:
-        st.info("NO RUN YET: generate demo proof to create the local certification chain.")
+        _render_presenter_alert(
+            "muted",
+            "NO RUN YET: generate demo proof to create the local certification chain.",
+        )
 
 
 def _render_presenter_actions() -> None:
+    st.markdown(
+        '<div class="rt-action-note">Presenter controls run the deterministic local proof path. Live Claude is separate so the judge path stays reliable.</div>',
+        unsafe_allow_html=True,
+    )
     cols = st.columns(5)
     if cols[0].button("Load Latest Proof", key="presenter_load", use_container_width=True):
         st.rerun()
@@ -248,12 +544,523 @@ def _render_presenter_stepper() -> None:
         "Claude Remediation",
         "Green Proof",
     ]
+    st.markdown(
+        '<div class="rt-stepper">'
+        + "".join(f'<div class="rt-step">{_html(label)}</div>' for label in labels)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_agent_profile_panel() -> None:
+    chips = "".join(f'<span class="rt-chip">{_html(capability)}</span>' for capability in PRESENTER_CAPABILITIES)
+    st.markdown(
+        f"""
+        <div class="rt-panel">
+          <h3 class="rt-panel-title">Agent Profile</h3>
+          <div class="rt-panel-subtitle">Support-agent scenario for refund, email, and customer-data tools.</div>
+          <div class="rt-label">Agent</div>
+          <div class="rt-value">Customer Support Agent</div>
+          <div class="rt-chip-row">
+            <span class="rt-chip">Level 2 guarded gateway</span>
+            {chips}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_generated_attacks_panel(state: dict[str, Any]) -> None:
+    red_summary = state.get("red_summary")
+    green_summary = state.get("green_summary")
+    cards = []
+    for attack in PRESENTER_ATTACKS:
+        attack_id = attack["id"]
+        red_status = _attack_status_label(red_summary, attack_id)
+        green_status = _attack_status_label(green_summary, attack_id)
+        assertion_count = _attack_assertion_count(state.get("attack_pack", []), attack_id)
+        cards.append(
+            _attack_card_html(
+                attack_id=attack_id,
+                name=str(attack["name"]),
+                red_status=red_status,
+                green_status=green_status,
+                assertion_count=assertion_count,
+                focus=bool(attack["focus"]),
+            )
+        )
+    st.markdown(
+        f"""
+        <div class="rt-panel">
+          <h3 class="rt-panel-title">Generated Attacks</h3>
+          <div class="rt-panel-subtitle">RedTeamCI generates tests from the agent's tool surface.</div>
+          <div class="rt-card-grid">{''.join(cards)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    attack_pack = state.get("attack_pack", [])
+    if attack_pack:
+        with st.expander("Show raw generated attack pack"):
+            st.json(attack_pack)
+
+
+def _render_red_gate_panel(state: dict[str, Any]) -> None:
+    red_summary = state.get("red_summary") or {}
+    github_status = _github_presenter_status()
+    local_gate = _summary_counts(red_summary)
+    refund_status = _attack_status_label(red_summary, "generated-refund-001")
+    refund_tone = _status_tone(refund_status)
+    st.markdown(
+        f"""
+        <div class="rt-panel">
+          <h3 class="rt-panel-title">Red Gate</h3>
+          <div class="rt-panel-subtitle">{_html(github_status)}. Release gate: Local proof active.</div>
+          <div class="rt-status-card rt-card-{_html(_summary_tone(red_summary, expect_fail=True))}">
+            <div class="rt-label">Local red summary</div>
+            <div class="rt-value">{_html(local_gate)}</div>
+          </div>
+          <div style="height:10px"></div>
+          <div class="rt-status-card rt-card-{_html(refund_tone)}">
+            <div class="rt-label">Structured tool behavior</div>
+            <div class="rt-value">generated-refund-001 - {_html(refund_status)}</div>
+            <div class="rt-panel-subtitle">CI failed on structured tool behavior, not final text.</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _github_presenter_status() -> str:
+    red_state = st.session_state.get("support_story_github_red")
+    if isinstance(red_state, dict):
+        conclusion = red_state.get("conclusion") or red_state.get("status")
+        if conclusion:
+            return f"GitHub CI: {conclusion}"
+    return "GitHub CI: connected" if github_available()[0] else "GitHub CI: not connected"
+
+
+def _render_trace_replay_panel(state: dict[str, Any]) -> None:
+    red_trace = load_story_trace(ROOT, "red", "generated-refund-001")
+    green_trace = load_story_trace(ROOT, "green", "generated-refund-001")
+    proof = state.get("proof", {})
+
+    red_lane = _trace_lane_html(
+        "RED",
+        red_trace,
+        terminal_event="tool_call_executed",
+        outcome="FAIL" if proof.get("red_refund_executed") else "-",
+        tone="bad",
+    )
+    green_lane = _trace_lane_html(
+        "GREEN",
+        green_trace,
+        terminal_event="tool_call_blocked",
+        outcome="PASS" if proof.get("green_refund_blocked") else "-",
+        tone="good",
+    )
+    st.markdown(
+        f"""
+        <div class="rt-panel">
+          <h3 class="rt-panel-title">Trace Replay</h3>
+          <div class="rt-panel-subtitle">
+            The replayable trace shows the refund tool call before and after remediation.
+          </div>
+          <div class="rt-trace-grid">{red_lane}{green_lane}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if red_trace:
+        with st.expander("Show red trace JSON"):
+            st.json(red_trace)
+    if green_trace:
+        with st.expander("Show green trace JSON"):
+            st.json(green_trace)
+
+
+def _render_trace_lane(
+    label: str,
+    trace: dict[str, Any] | None,
+    *,
+    terminal_event: str,
+    outcome: str,
+) -> None:
+    st.write(f"**{label}**")
+    attempted = _first_tool_event(trace, "tool_call_attempted", "issue_refund")
+    terminal = _first_tool_event(trace, terminal_event, "issue_refund")
+    st.code(_trace_event_line(attempted, "tool_call_attempted issue_refund amount=500 approved=false"))
+    if terminal_event == "tool_call_blocked":
+        fallback = "tool_call_blocked issue_refund"
+    else:
+        fallback = "tool_call_executed issue_refund"
+    st.code(_trace_event_line(terminal, fallback))
+    if outcome == "PASS":
+        st.success("PASS")
+    elif outcome == "FAIL":
+        st.error("FAIL")
+    else:
+        st.caption("-")
+
+
+def _trace_lane_html(
+    label: str,
+    trace: dict[str, Any] | None,
+    *,
+    terminal_event: str,
+    outcome: str,
+    tone: str,
+) -> str:
+    attempted = _first_tool_event(trace, "tool_call_attempted", "issue_refund")
+    terminal = _first_tool_event(trace, terminal_event, "issue_refund")
+    attempted_line = _trace_event_line(
+        attempted,
+        f"tool_call_attempted issue_refund amount={PRESENTER_REFUND_AMOUNT} approved=false",
+    )
+    terminal_fallback = (
+        "tool_call_blocked issue_refund"
+        if terminal_event == "tool_call_blocked"
+        else "tool_call_executed issue_refund"
+    )
+    terminal_line = _trace_event_line(terminal, terminal_fallback)
+    outcome_class = "rt-outcome-good" if outcome == "PASS" else "rt-outcome-bad" if outcome == "FAIL" else ""
+    event_class = "rt-event-good" if tone == "good" else "rt-event-bad"
+    lane_class = "rt-lane-green" if tone == "good" else "rt-lane-red"
+    return f"""
+      <div class="rt-lane {lane_class}">
+        <div class="rt-lane-title">{_html(label)}</div>
+        <div class="rt-event">{_html(attempted_line)}</div>
+        <div class="rt-event {event_class}">{_html(terminal_line)}</div>
+        <div class="rt-outcome {outcome_class}">{_html(outcome)}</div>
+      </div>
+    """
+
+
+def _first_tool_event(
+    trace: dict[str, Any] | None,
+    event_type: str,
+    tool: str,
+) -> dict[str, Any] | None:
+    if not trace:
+        return None
+    for event in trace.get("events", []):
+        if event.get("type") == event_type and event.get("tool") == tool:
+            return event
+    return None
+
+
+def _trace_event_line(event: dict[str, Any] | None, fallback: str) -> str:
+    if not event:
+        return fallback
+    event_type = str(event.get("type", "event"))
+    tool = str(event.get("tool", "tool"))
+    args = event.get("args", {})
+    if isinstance(args, dict) and event_type == "tool_call_attempted":
+        amount = args.get("amount", PRESENTER_REFUND_AMOUNT)
+        approved = str(args.get("approved", False)).lower()
+        return f"{event_type} {tool} amount={amount} approved={approved}"
+    return f"{event_type} {tool}"
+
+
+def _render_sentry_incident_panel(state: dict[str, Any]) -> None:
+    context = build_sentry_dashboard_context(state)
+    configured = bool(context["configured"])
+    event_ids = context["event_ids"]
+    event_text = ", ".join(event_ids) if event_ids else "No incident event recorded"
+    st.markdown(
+        f"""
+        <div class="rt-panel">
+          <h3 class="rt-panel-title">Sentry Incident</h3>
+          <div class="rt-panel-subtitle">Sponsor proof without blocking the local release gate.</div>
+          <div class="rt-status-card rt-card-{'good' if configured else 'muted'}">
+            <div class="rt-label">Sentry</div>
+            <div class="rt-value">{'optional, configured' if configured else 'optional, not configured'}</div>
+          </div>
+          <div style="height:10px"></div>
+          <div class="rt-status-card rt-card-{'good' if event_ids else 'muted'}">
+            <div class="rt-label">Red incident IDs</div>
+            <div class="rt-value">{_html(event_text)}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if context["open_url"]:
+        st.link_button("Open in Sentry", context["open_url"])
+    with st.expander("Raw Sentry context"):
+        st.json(
+            {
+                "configured": context["configured"],
+                "event_ids": context["event_ids"],
+                "tags": context["tags"],
+                "fingerprint": context["fingerprint"],
+                "artifacts": context["artifact_paths"],
+            }
+        )
+
+
+def _render_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
+    remediation = state.get("remediation", {})
+    if not isinstance(remediation, dict):
+        remediation = {}
+    summary_path = _root_path(root, remediation.get("summary_path"))
+    summary = _load_json_object(summary_path) if summary_path else {}
+    if not summary:
+        story_root = root / SUPPORT_STORY_RELATIVE_ROOT
+        summary_path = story_root / "patches" / "support_story_summary.json"
+        summary = _load_json_object(summary_path) or {}
+
+    diff_path = _root_path(root, summary.get("diff_path") or remediation.get("diff_path"))
+    regression_path = _root_path(
+        root,
+        summary.get("regression_test_path") or remediation.get("regression_test_path"),
+    )
+    prompt_path = _root_path(root, remediation.get("prompt_path") or summary.get("prompt_path"))
+    raw_output_path = _root_path(root, remediation.get("raw_output_path") or summary.get("raw_output_path"))
+    proposal_path = _root_path(root, remediation.get("proposal_path") or summary.get("proposal_path"))
+    validation_path = _root_path(
+        root,
+        remediation.get("validation_error_path") or summary.get("validation_error_path"),
+    )
+
+    status = _claude_status(summary, state)
+    proposal_or_fixture = bool(
+        proposal_path and proposal_path.exists()
+        or summary.get("fixture")
+        or summary.get("source") == "fixture"
+    )
+    tiles = [
+        ("Prompt artifact", bool(prompt_path and prompt_path.exists())),
+        ("Proposal / fixture artifact", proposal_or_fixture),
+        ("Guardrail diff", bool(diff_path and diff_path.exists())),
+        ("Generated regression", bool(regression_path and regression_path.exists())),
+    ]
+    st.markdown(
+        f"""
+        <div class="rt-panel">
+          <h3 class="rt-panel-title">Claude Remediation</h3>
+          <div class="rt-panel-subtitle">{_html(status['message'])}</div>
+          <div class="rt-proof-grid">
+            {''.join(_proof_tile_html(label, ok) for label, ok in tiles)}
+          </div>
+          <div style="height:12px"></div>
+          <div class="rt-status-card rt-card-{_html(status['tone'])}">
+            <div class="rt-label">Guardrail patch</div>
+            <div class="rt-value">high-value refunds require approval</div>
+          </div>
+          <div style="height:10px"></div>
+          <div class="rt-status-card rt-card-{'good' if regression_path and regression_path.exists() else 'muted'}">
+            <div class="rt-label">Generated regression</div>
+            <div class="rt-value">regression-generated-refund-001</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if prompt_path and prompt_path.exists():
+        with st.expander("prompt"):
+            st.code(prompt_path.read_text(encoding="utf-8"))
+    if raw_output_path and raw_output_path.exists():
+        with st.expander("raw output"):
+            st.json(_load_json(raw_output_path) or {})
+    if proposal_path and proposal_path.exists():
+        with st.expander("parsed proposal JSON"):
+            st.json(_load_json(proposal_path) or {})
+    if validation_path and validation_path.exists():
+        with st.expander("validation result"):
+            st.json(_load_json(validation_path) or {})
+    elif summary:
+        with st.expander("validation result"):
+            st.caption("Validation passed")
+    if diff_path and diff_path.exists():
+        with st.expander("full diff"):
+            st.code(diff_path.read_text(encoding="utf-8"), language="diff")
+
+
+def _render_claude_status_line(state: dict[str, Any], summary: dict[str, Any]) -> None:
+    if summary.get("live_claude_proposal_applied"):
+        st.success("Live Claude Code proposal applied")
+        return
+    if summary.get("fixture_fallback_used") or summary.get("source") == "fixture":
+        st.warning("Deterministic fallback used")
+        return
+    if not state.get("claude_code_available"):
+        st.caption("Claude Code unavailable")
+        return
+    if summary:
+        st.error("Claude Code remediation did not apply")
+    else:
+        st.info("Run Claude remediation to create proof artifacts.")
+
+
+def _claude_status(summary: dict[str, Any], state: dict[str, Any]) -> dict[str, str]:
+    if summary.get("live_claude_proposal_applied"):
+        return {"message": "Live Claude Code proposal applied", "tone": "good"}
+    if summary.get("fixture_fallback_used") or summary.get("source") == "fixture":
+        return {"message": "Deterministic fallback used", "tone": "warn"}
+    if not state.get("claude_code_available"):
+        return {"message": "Claude Code unavailable", "tone": "muted"}
+    if summary:
+        return {"message": "Claude Code remediation did not apply", "tone": "bad"}
+    return {"message": "Run Claude remediation to create proof artifacts", "tone": "muted"}
+
+
+def _render_proof_tile(column: Any, label: str, ok: bool) -> None:
+    with column:
+        if ok:
+            st.success(label)
+        else:
+            st.caption(label)
+
+
+def _render_presenter_green_proof_panel(
+    state: dict[str, Any],
+    readiness: dict[str, Any],
+) -> None:
+    proof = state.get("proof", {})
+    green_summary = state.get("green_summary") or {}
+    green_status = _summary_counts(green_summary)
+    refund_status = _attack_status_label(green_summary, "generated-refund-001")
+    regression_status = _attack_status_label(green_summary, "regression-generated-refund-001")
+    certified = readiness["status"] == "ready"
+    st.markdown(
+        f"""
+        <div class="rt-panel">
+          <h3 class="rt-panel-title">Green Proof</h3>
+          <div class="rt-panel-subtitle">The same refund was attempted again, then blocked before execution.</div>
+          <div class="rt-status-grid">
+            {_status_card_html('Green gate', green_status, _summary_tone(green_summary))}
+            {_status_card_html('generated-refund-001', refund_status, _status_tone(refund_status))}
+            {_status_card_html('regression-generated-refund-001', regression_status, _status_tone(regression_status))}
+            {_status_card_html('Refund attempted', _yes_no(proof.get('green_refund_attempted')), 'good' if proof.get('green_refund_attempted') else 'muted')}
+            {_status_card_html('Blocked before execution', _yes_no(proof.get('green_refund_blocked')), 'good' if proof.get('green_refund_blocked') else 'bad')}
+          </div>
+          <div class="rt-alert {'rt-alert-good' if certified else 'rt-alert-warn'}">
+            {'AGENT CERTIFIED' if certified else 'AGENT NOT CERTIFIED'}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.expander("Proof checklist"):
+        for label, ok in readiness["checks"].items():
+            if ok:
+                st.success(label)
+            else:
+                st.error(label)
+
+
+def _render_classic_presenter_mode() -> None:
+    state = load_support_story_dashboard_state(ROOT)
+    readiness = demo_readiness_status(state)
+
+    _render_classic_presenter_header(state, readiness)
+    _render_classic_presenter_actions()
+    _render_classic_presenter_stepper()
+
+    profile_col, attacks_col, red_col = st.columns([1.1, 1.3, 1.2])
+    with profile_col:
+        _render_classic_agent_profile_panel()
+    with attacks_col:
+        _render_classic_generated_attacks_panel(state)
+    with red_col:
+        _render_classic_red_gate_panel(state)
+
+    _render_classic_trace_replay_panel(state)
+
+    sentry_col, claude_col = st.columns([1.0, 1.6])
+    with sentry_col:
+        _render_classic_sentry_incident_panel(state)
+    with claude_col:
+        _render_classic_claude_remediation_panel(ROOT, state)
+
+    _render_classic_green_proof_panel(state, readiness)
+
+
+def _render_classic_presenter_header(
+    state: dict[str, Any],
+    readiness: dict[str, Any],
+) -> None:
+    st.title("RedTeamCI")
+    st.subheader("Claude Code for AI-agent security gates")
+    st.caption("pytest for AI-agent security")
+
+    github_connected = github_available()[0]
+    sentry_context = build_sentry_dashboard_context(state)
+    status_cols = st.columns(5)
+    status_cols[0].metric("Scenario", "Customer Support Agent")
+    status_cols[1].metric("Proof", readiness["label"])
+    status_cols[2].metric("Release gate", "Local proof active")
+    status_cols[3].metric(
+        "GitHub CI",
+        "connected" if github_connected else "not connected",
+    )
+    status_cols[4].metric(
+        "Sentry",
+        "optional, configured" if sentry_context["configured"] else "optional, not configured",
+    )
+
+    if readiness["status"] == "ready":
+        st.success("DEMO READY: red exploit, remediation artifact, generated regression, and green proof are complete.")
+    elif readiness["status"] == "partial":
+        st.warning("INCOMPLETE: proof artifacts exist, but the full certification chain is not complete yet.")
+    else:
+        st.info("NO RUN YET: generate demo proof to create the local certification chain.")
+
+
+def _render_classic_presenter_actions() -> None:
+    cols = st.columns(5)
+    if cols[0].button("Load Latest Proof", key="classic_presenter_load", use_container_width=True):
+        st.rerun()
+    if cols[1].button(
+        "Generate Demo Proof",
+        key="classic_presenter_generate_demo_proof",
+        use_container_width=True,
+    ):
+        with st.spinner("Generating deterministic demo proof..."):
+            run_deterministic_demo_proof()
+        st.rerun()
+    if cols[2].button("Run Red Gate", key="classic_presenter_run_red", use_container_width=True):
+        run_cli(["story", "support", "--step", "red"])
+        st.rerun()
+
+    strict_live = st.checkbox("Strict live Claude", key="classic_presenter_strict_live")
+    if cols[3].button(
+        "Run Live Claude",
+        key="classic_presenter_run_live_claude",
+        use_container_width=True,
+    ):
+        args = ["story", "support", "--step", "claude-code-remediate"]
+        if strict_live:
+            args.append("--strict-claude-code")
+        else:
+            args.append("--fixture-fallback")
+        run_cli(args)
+        st.rerun()
+    if cols[4].button("Run Green Proof", key="classic_presenter_run_green", use_container_width=True):
+        run_cli(["story", "support", "--step", "green"])
+        st.rerun()
+
+
+def _render_classic_presenter_stepper() -> None:
+    labels = [
+        "Agent Profile",
+        "Generated Attacks",
+        "Red Gate",
+        "Trace Replay",
+        "Sentry Incident",
+        "Claude Remediation",
+        "Green Proof",
+    ]
     cols = st.columns(len(labels))
     for col, label in zip(cols, labels):
         col.caption(label)
 
 
-def _render_agent_profile_panel() -> None:
+def _render_classic_agent_profile_panel() -> None:
     with st.container(border=True):
         st.subheader("Agent Profile")
         st.metric("Agent", "Customer Support Agent")
@@ -262,7 +1069,7 @@ def _render_agent_profile_panel() -> None:
         st.write(" ".join(f"`{capability}`" for capability in PRESENTER_CAPABILITIES))
 
 
-def _render_generated_attacks_panel(state: dict[str, Any]) -> None:
+def _render_classic_generated_attacks_panel(state: dict[str, Any]) -> None:
     with st.container(border=True):
         st.subheader("Generated Attacks")
         st.caption("RedTeamCI generates tests from the agent's tool surface.")
@@ -288,7 +1095,7 @@ def _render_generated_attacks_panel(state: dict[str, Any]) -> None:
                 st.json(attack_pack)
 
 
-def _render_red_gate_panel(state: dict[str, Any]) -> None:
+def _render_classic_red_gate_panel(state: dict[str, Any]) -> None:
     red_summary = state.get("red_summary") or {}
     with st.container(border=True):
         st.subheader("Red Gate")
@@ -307,16 +1114,7 @@ def _render_red_gate_panel(state: dict[str, Any]) -> None:
         st.caption("CI failed on structured tool behavior, not final text.")
 
 
-def _github_presenter_status() -> str:
-    red_state = st.session_state.get("support_story_github_red")
-    if isinstance(red_state, dict):
-        conclusion = red_state.get("conclusion") or red_state.get("status")
-        if conclusion:
-            return f"GitHub CI: {conclusion}"
-    return "GitHub CI: connected" if github_available()[0] else "GitHub CI: not connected"
-
-
-def _render_trace_replay_panel(state: dict[str, Any]) -> None:
+def _render_classic_trace_replay_panel(state: dict[str, Any]) -> None:
     red_trace = load_story_trace(ROOT, "red", "generated-refund-001")
     green_trace = load_story_trace(ROOT, "green", "generated-refund-001")
     proof = state.get("proof", {})
@@ -346,57 +1144,7 @@ def _render_trace_replay_panel(state: dict[str, Any]) -> None:
                 st.json(green_trace)
 
 
-def _render_trace_lane(
-    label: str,
-    trace: dict[str, Any] | None,
-    *,
-    terminal_event: str,
-    outcome: str,
-) -> None:
-    st.write(f"**{label}**")
-    attempted = _first_tool_event(trace, "tool_call_attempted", "issue_refund")
-    terminal = _first_tool_event(trace, terminal_event, "issue_refund")
-    st.code(_trace_event_line(attempted, "tool_call_attempted issue_refund amount=500 approved=false"))
-    if terminal_event == "tool_call_blocked":
-        fallback = "tool_call_blocked issue_refund"
-    else:
-        fallback = "tool_call_executed issue_refund"
-    st.code(_trace_event_line(terminal, fallback))
-    if outcome == "PASS":
-        st.success("PASS")
-    elif outcome == "FAIL":
-        st.error("FAIL")
-    else:
-        st.caption("-")
-
-
-def _first_tool_event(
-    trace: dict[str, Any] | None,
-    event_type: str,
-    tool: str,
-) -> dict[str, Any] | None:
-    if not trace:
-        return None
-    for event in trace.get("events", []):
-        if event.get("type") == event_type and event.get("tool") == tool:
-            return event
-    return None
-
-
-def _trace_event_line(event: dict[str, Any] | None, fallback: str) -> str:
-    if not event:
-        return fallback
-    event_type = str(event.get("type", "event"))
-    tool = str(event.get("tool", "tool"))
-    args = event.get("args", {})
-    if isinstance(args, dict) and event_type == "tool_call_attempted":
-        amount = args.get("amount", 500)
-        approved = str(args.get("approved", False)).lower()
-        return f"{event_type} {tool} amount={amount} approved={approved}"
-    return f"{event_type} {tool}"
-
-
-def _render_sentry_incident_panel(state: dict[str, Any]) -> None:
+def _render_classic_sentry_incident_panel(state: dict[str, Any]) -> None:
     context = build_sentry_dashboard_context(state)
     with st.container(border=True):
         st.subheader("Sentry Incident")
@@ -422,7 +1170,7 @@ def _render_sentry_incident_panel(state: dict[str, Any]) -> None:
             )
 
 
-def _render_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
+def _render_classic_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
     remediation = state.get("remediation", {})
     if not isinstance(remediation, dict):
         remediation = {}
@@ -487,31 +1235,7 @@ def _render_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
                 st.code(diff_path.read_text(encoding="utf-8"), language="diff")
 
 
-def _render_claude_status_line(state: dict[str, Any], summary: dict[str, Any]) -> None:
-    if summary.get("live_claude_proposal_applied"):
-        st.success("Live Claude Code proposal applied")
-        return
-    if summary.get("fixture_fallback_used") or summary.get("source") == "fixture":
-        st.warning("Deterministic fallback used")
-        return
-    if not state.get("claude_code_available"):
-        st.caption("Claude Code unavailable")
-        return
-    if summary:
-        st.error("Claude Code remediation did not apply")
-    else:
-        st.info("Run Claude remediation to create proof artifacts.")
-
-
-def _render_proof_tile(column: Any, label: str, ok: bool) -> None:
-    with column:
-        if ok:
-            st.success(label)
-        else:
-            st.caption(label)
-
-
-def _render_presenter_green_proof_panel(
+def _render_classic_green_proof_panel(
     state: dict[str, Any],
     readiness: dict[str, Any],
 ) -> None:
@@ -1237,6 +1961,109 @@ def build_sentry_dashboard_context(
         "artifact_paths": _sentry_artifact_paths(extra),
         "open_url": _sentry_search_url(event_ids, environ),
     }
+
+
+def _html(value: Any) -> str:
+    return escape(str(value), quote=True)
+
+
+def _readiness_tone(readiness: dict[str, Any]) -> str:
+    status = readiness.get("status")
+    if status == "ready":
+        return "good"
+    if status == "partial":
+        return "warn"
+    return "muted"
+
+
+def _status_tone(status: str) -> str:
+    normalized = str(status).upper()
+    if normalized == "PASS":
+        return "good"
+    if normalized == "FAIL":
+        return "bad"
+    return "muted"
+
+
+def _summary_tone(
+    summary: dict[str, Any] | None,
+    *,
+    expect_fail: bool = False,
+) -> str:
+    if not summary:
+        return "muted"
+    failed = int(summary.get("failed", 0) or 0)
+    passed = int(summary.get("passed", 0) or 0)
+    if expect_fail:
+        return "bad" if failed else "warn"
+    if failed:
+        return "bad"
+    if passed:
+        return "good"
+    return "muted"
+
+
+def _status_card_html(label: str, value: Any, tone: str) -> str:
+    tone = tone if tone in {"good", "bad", "warn", "muted"} else "muted"
+    return f"""
+      <div class="rt-status-card rt-card-{_html(tone)}">
+        <div class="rt-label">{_html(label)}</div>
+        <div class="rt-value">{_html(value)}</div>
+      </div>
+    """
+
+
+def _proof_tile_html(label: str, ok: bool) -> str:
+    tone = "good" if ok else "muted"
+    state = "ready" if ok else "pending"
+    return f"""
+      <div class="rt-proof-tile rt-card-{tone}">
+        <strong>{_html(label)}</strong>
+        <span class="rt-muted">{_html(state)}</span>
+      </div>
+    """
+
+
+def _render_presenter_alert(tone: str, message: str) -> None:
+    tone = tone if tone in {"good", "warn", "muted"} else "muted"
+    st.markdown(
+        f'<div class="rt-alert rt-alert-{_html(tone)}">{_html(message)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _attack_card_html(
+    *,
+    attack_id: str,
+    name: str,
+    red_status: str,
+    green_status: str,
+    assertion_count: int,
+    focus: bool,
+) -> str:
+    tone = "bad" if red_status == "FAIL" else "good" if green_status == "PASS" else "muted"
+    focus_label = '<span class="rt-pill rt-pill-warn">script focus</span>' if focus else ""
+    return f"""
+      <div class="rt-attack-card rt-card-{_html(tone)}">
+        <div class="rt-attack-id">{_html(attack_id)}</div>
+        <div class="rt-attack-name">{_html(name)}</div>
+        <div class="rt-mini-row">
+          <span class="rt-pill">generated</span>
+          <span class="rt-pill">assertions: {_html(assertion_count or '-')}</span>
+          <span class="rt-pill {_pill_class(red_status)}">red: {_html(red_status)}</span>
+          <span class="rt-pill {_pill_class(green_status)}">green: {_html(green_status)}</span>
+          {focus_label}
+        </div>
+      </div>
+    """
+
+
+def _pill_class(status: str) -> str:
+    if status == "PASS":
+        return "rt-pill-good"
+    if status == "FAIL":
+        return "rt-pill-bad"
+    return ""
 
 
 def _sentry_event_ids(summary: dict[str, Any] | None) -> list[str]:
