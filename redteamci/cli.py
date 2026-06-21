@@ -311,7 +311,7 @@ def fix_command(args: argparse.Namespace) -> int:
         run_id=args.run_id,
     )
     trace_path = Path(trace["trace_path"])
-    apply = False if args.dry_run else (args.apply or not args.dry_run)
+    apply = bool(args.apply and not args.dry_run)
     remediator = ClaudeCodeRemediator()
     result = remediator.remediate(
         attack_id=args.attack_id,

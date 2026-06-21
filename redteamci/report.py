@@ -113,7 +113,11 @@ def _render_report(before: dict[str, Any], after: dict[str, Any]) -> str:
             f"Fixture fallback used: {_yes_no(patch_summary.get('fixture_fallback_used'))}",
             f"Claude artifact path: {patch_summary.get('claude_artifact_path') or patch_summary.get('prompt_path') or '-'}",
             f"Regression test path: {patch_summary.get('regression_test_path')}",
-            f"Failure reason: {patch_summary.get('error')}",
+            *(
+                [f"Failure reason: {patch_summary.get('error')}"]
+                if patch_summary.get("error")
+                else []
+            ),
             "",
             "Changed files:",
         ]
