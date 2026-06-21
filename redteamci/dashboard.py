@@ -74,20 +74,18 @@ PRESENTER_ATTACKS = [
 ]
 PRESENTER_CAPABILITIES = ["Refunds", "Email", "Customer Data", "PII"]
 DETERMINISTIC_DEMO_PROOF_STEPS = ["prepare", "plan", "red", "remediate", "green"]
-PRESENTER_REFUND_AMOUNT = 499
+PRESENTER_REFUND_AMOUNT = 500
 
 
 def main() -> None:
     streamlit = _require_streamlit()
     streamlit.set_page_config(page_title="RedTeamCI", layout="wide")
 
-    modern_presenter_tab, presenter_tab, developer_tab, artifacts_tab = st.tabs(
-        ["Modern Presenter Mode", "Presenter Mode", "Developer Mode", "Artifacts"]
+    presenter_tab, developer_tab, artifacts_tab = st.tabs(
+        ["Presenter Mode", "Developer Mode", "Artifacts"]
     )
-    with modern_presenter_tab:
-        _render_presenter_mode()
     with presenter_tab:
-        _render_classic_presenter_mode()
+        _render_presenter_mode()
     with developer_tab:
         st.subheader("Support Story Deep Inspection")
         _render_support_story_mode()
@@ -485,10 +483,6 @@ def _render_presenter_header(
 
 
 def _render_presenter_actions() -> None:
-    st.markdown(
-        '<div class="rt-action-note">Presenter controls run the deterministic local proof path. Live Claude is separate so the judge path stays reliable.</div>',
-        unsafe_allow_html=True,
-    )
     cols = st.columns(5)
     if cols[0].button("Load Latest Proof", key="presenter_load", use_container_width=True):
         st.rerun()

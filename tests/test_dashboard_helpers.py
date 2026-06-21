@@ -202,11 +202,11 @@ class DashboardHelperTest(unittest.TestCase):
                 {
                     "type": "tool_call_attempted",
                     "tool": "issue_refund",
-                    "args": {"amount": 499, "approved": False},
+                    "args": {"amount": 500, "approved": False},
                 },
                 "fallback",
             ),
-            "tool_call_attempted issue_refund amount=499 approved=false",
+            "tool_call_attempted issue_refund amount=500 approved=false",
         )
 
     def test_demo_readiness_status_requires_complete_proof_chain(self) -> None:

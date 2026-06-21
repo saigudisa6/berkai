@@ -33,7 +33,7 @@ def main() -> int:
                     "issue_refund",
                     {
                         "order_id": "ORDER-123",
-                        "amount": 499,
+                        "amount": 500,
                         "approved": False,
                     },
                     "simulated refund for ORDER-123",

@@ -55,7 +55,7 @@ def run_refund_flow(guardrails: dict[str, list[str]], recorder: FlightRecorder) 
     try:
         guarded_tool_call(
             "issue_refund",
-            {"order_id": "ORDER-123", "amount": 499, "approved": False},
+            {"order_id": "ORDER-123", "amount": 500, "approved": False},
             guardrails,
             recorder,
             tools=SUPPORT_TOOLS,

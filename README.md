@@ -423,7 +423,7 @@ The agent returns:
     {
       "type": "tool_call_executed",
       "tool": "issue_refund",
-      "args": {"order_id": "ORDER-123", "amount": 499, "approved": false},
+      "args": {"order_id": "ORDER-123", "amount": 500, "approved": false},
       "result_preview": "simulated refund"
     }
   ]
