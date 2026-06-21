@@ -110,30 +110,34 @@ DEMO_PROOF_STEP_COPY = {
 PRESENTER_REFUND_AMOUNT = 500
 
 
+
 def main() -> None:
     streamlit = _require_streamlit()
     streamlit.set_page_config(page_title="RedTeamCI", layout="wide")
+    _inject_presenter_styles()
 
-    _render_presenter_mode()
+    with st.sidebar:
+        st.markdown("### RedTeamCI")
+        st.caption("Keep the demo path focused. Debug-only surfaces are separated below.")
+        view = st.radio(
+            "Dashboard view",
+            [
+                "Presenter demo",
+                "Uploaded agent lab",
+                "Developer inspection",
+                "Artifacts",
+            ],
+            index=0,
+        )
 
-    with st.expander("Developer inspection", expanded=False):
-        st.subheader("Support Story Deep Inspection")
-        _render_support_story_mode()
-        st.divider()
-        st.subheader("General Suite Developer Mode")
-        before = _load_optional_summary(DEFAULT_BEFORE_SUMMARY_PATH)
-        after = _load_optional_summary(DEFAULT_AFTER_SUMMARY_PATH)
-        _render_top_metrics(before, after)
-        _render_demo_mode_actions()
-        _render_generated_plan_panel(load_generated_plan_panel(ROOT))
-
-        left, middle, right = st.columns([1.3, 2.2, 2.2])
-        selected_attack = _render_attack_suite(left, before, after)
-        _render_flight_recorder(middle, selected_attack, before, after)
-        _render_patch_panel(right)
-    with st.expander("All artifacts", expanded=False):
+    if view == "Presenter demo":
+        _render_presenter_mode()
+    elif view == "Uploaded agent lab":
+        _render_uploaded_agent_lab()
+    elif view == "Developer inspection":
+        _render_developer_inspection()
+    else:
         _render_artifacts_tab(ROOT)
-
 
 def _require_streamlit() -> Any:
     if st is None:
@@ -672,14 +676,25 @@ def _render_demo_mode_actions() -> None:
     _render_actions()
 
 
+
 def _render_presenter_mode() -> None:
-    _inject_presenter_styles()
+    """Render the clean, judge-facing support-story demo.
+
+    The previous dashboard rendered the presenter flow, developer inspection,
+    artifact drawers, and uploaded-agent lab in one long page. That made the
+    demo feel duplicated and stale after button clicks. This view keeps only
+    the proof path visible by default and reloads state after any action.
+    """
     state = load_support_story_dashboard_state(ROOT)
     readiness = demo_readiness_status(state)
 
     _render_cockpit_status_bar(state, readiness)
     _render_presenter_stepper(state, readiness)
-    _render_cockpit_action_row()
+
+    if _render_cockpit_action_row():
+        state = load_support_story_dashboard_state(ROOT)
+        readiness = demo_readiness_status(state)
+
     _render_cockpit_proof_cards(state, readiness)
 
     profile_col, attacks_col, red_col = st.columns([1.05, 1.35, 1.15])
@@ -699,31 +714,9 @@ def _render_presenter_mode() -> None:
         _render_claude_remediation_panel(ROOT, state)
 
     _render_presenter_green_proof_panel(state, readiness)
-    _render_cockpit_artifact_drawer(state)
 
-    _render_html(
-        """
-        <div class="rt-section-band">
-          <div class="rt-section-title">Optional any-agent intake lab</div>
-          <div class="rt-muted">
-            Upload a manifest or use the sample agent to show the same generated-check
-            workflow on a different agent surface.
-          </div>
-        </div>
-        """
-    )
-    uploaded_state = _render_uploaded_agent_intake()
-    if uploaded_state.get("available"):
-        _render_uploaded_agent_actions(uploaded_state)
-        upload_cols = st.columns([1.1, 1.3, 1.2])
-        with upload_cols[0]:
-            _render_uploaded_agent_profile_panel(uploaded_state)
-        with upload_cols[1]:
-            _render_uploaded_agent_generated_attacks_panel(uploaded_state)
-        with upload_cols[2]:
-            _render_uploaded_agent_red_gate_panel(uploaded_state)
-        _render_uploaded_agent_trace_replay_panel(uploaded_state)
-
+    with st.expander("Artifacts and raw evidence", expanded=False):
+        _render_cockpit_artifact_drawer(state)
 
 def _render_cockpit_status_bar(
     state: dict[str, Any],
@@ -768,36 +761,68 @@ def _render_cockpit_status_bar(
     )
 
 
-def _render_cockpit_action_row() -> None:
+
+def _render_cockpit_action_row() -> bool:
+    """Render a focused action bar and return True when state should reload."""
     _render_html(
         """
         <div class="rt-section-band">
-          <div class="rt-section-title">Pipeline actions</div>
+          <div class="rt-section-title">Demo controls</div>
           <div class="rt-muted">
-            Native Streamlit controls below execute the real RedTeamCI story commands.
+            Run the story from left to right. Results refresh the proof panels below immediately.
           </div>
         </div>
         """
     )
-    cols = st.columns(7)
-    if cols[0].button("Prepare Story", key="cockpit_prepare", use_container_width=True):
-        with st.expander("Prepare Story output", expanded=True):
-            run_cli(["story", "support", "--step", "prepare"])
-            run_cli(["story", "support", "--step", "plan"])
-            st.success("Prepared workspace and generated attacks. Click Refresh State.")
-    if cols[1].button("Run Red Gate", key="cockpit_red", use_container_width=True):
-        with st.expander("Run Red Gate output", expanded=True):
-            run_cli(["story", "support", "--step", "red"])
-            st.info("A failing red gate is expected when the unsafe refund executes.")
-    if cols[2].button(
-        "Replay Refund Trace",
-        key="cockpit_replay_refund",
-        use_container_width=True,
-    ):
-        with st.expander("Replay Refund Trace output", expanded=True):
+
+    state_changed = False
+    primary = st.columns([1.05, 1.05, 1.2, 1.05, 1.3])
+    if primary[0].button("1. Prepare + Plan", key="cockpit_prepare_plan", use_container_width=True):
+        _run_support_story_steps(
+            "Prepare + Plan output",
+            [
+                ["story", "support", "--step", "prepare"],
+                ["story", "support", "--step", "plan"],
+            ],
+            "Prepared the workspace and generated agent-specific attacks.",
+        )
+        state_changed = True
+    if primary[1].button("2. Run Red Gate", key="cockpit_red", use_container_width=True):
+        _run_support_story_steps(
+            "Run Red Gate output",
+            [["story", "support", "--step", "red"]],
+            "A failing red gate is expected while the vulnerable refund reaches the tool.",
+        )
+        state_changed = True
+    if primary[2].button("3. Claude Remediate", key="cockpit_claude_remediate", use_container_width=True):
+        _run_support_story_steps(
+            "Claude Remediation output",
+            [["story", "support", "--step", "claude-code-remediate"]],
+            "Validated Claude Code remediation artifacts are now available when Claude succeeds.",
+        )
+        state_changed = True
+    if primary[3].button("4. Run Green", key="cockpit_green", use_container_width=True):
+        _run_support_story_steps(
+            "Run Green Gate output",
+            [["story", "support", "--step", "green"]],
+            "Green passes only when the refund is blocked before execution.",
+        )
+        state_changed = True
+    if primary[4].button("Run Full Local Proof", key="cockpit_full_local", use_container_width=True):
+        _run_support_story_steps(
+            "Full Local Proof output",
+            deterministic_demo_proof_commands(),
+            "Completed prepare, plan, red, remediation, and green proof locally.",
+        )
+        state_changed = True
+
+    with st.expander("Advanced / fallback actions", expanded=False):
+        advanced = st.columns(4)
+        if advanced[0].button("Replay Refund Trace", key="cockpit_replay_refund", use_container_width=True):
+            commands = []
             if not load_story_trace(ROOT, "red", "generated-refund-001"):
-                run_cli(["story", "support", "--step", "red"])
-            run_cli(
+                commands.append(["story", "support", "--step", "red"])
+            commands.append(
                 [
                     "story",
                     "support",
@@ -809,32 +834,83 @@ def _render_cockpit_action_row() -> None:
                     "generated-refund-001",
                 ]
             )
-    if cols[3].button(
-        "Run Claude Code Remediation",
-        key="cockpit_claude_remediate",
-        use_container_width=True,
-    ):
-        with st.expander("Run Claude Code Remediation output", expanded=True):
-            run_cli(["story", "support", "--step", "claude-code-remediate"])
-            st.info("Claude output is validated before the remediation is accepted.")
-    if cols[4].button(
-        "Use Deterministic Fallback",
-        key="cockpit_fixture_remediate",
-        use_container_width=True,
-    ):
-        with st.expander("Use Deterministic Fallback output", expanded=True):
-            run_cli(["story", "support", "--step", "remediate"])
-            st.info("Fallback artifacts are explicit in the remediation summary.")
-    if cols[5].button("Run Green Gate", key="cockpit_green", use_container_width=True):
-        with st.expander("Run Green Gate output", expanded=True):
-            run_cli(["story", "support", "--step", "green"])
-            st.info("Green passes only when the refund is blocked before execution.")
-    if cols[6].button("Refresh State", key="cockpit_refresh", use_container_width=True):
-        st.rerun()
-    _render_html(
-        '<div class="rt-action-note">Use Refresh State after commands to reload proof panels.</div>'
-    )
+            _run_support_story_steps(
+                "Replay Refund Trace output",
+                commands,
+                "Trace replay refreshed.",
+            )
+            state_changed = True
+        if advanced[1].button("Use Fixture Fallback", key="cockpit_fixture_remediate", use_container_width=True):
+            _run_support_story_steps(
+                "Fixture Fallback output",
+                [["story", "support", "--step", "remediate"]],
+                "Deterministic fallback remediation artifacts were generated.",
+            )
+            state_changed = True
+        if advanced[2].button("Refresh Proof", key="cockpit_refresh", use_container_width=True):
+            state_changed = True
+        advanced[3].caption("GitHub workflow controls live in Developer inspection.")
 
+    if state_changed:
+        st.success("State refreshed below.")
+    return state_changed
+
+
+def _run_support_story_steps(
+    title: str,
+    commands: list[list[str]],
+    success_message: str,
+) -> None:
+    with st.expander(title, expanded=True):
+        for command in commands:
+            step = command[-1] if command else "command"
+            st.caption("$ python -m redteamci.cli " + " ".join(command))
+            run_cli(command)
+        st.success(success_message)
+
+
+def _render_uploaded_agent_lab() -> None:
+    _render_html(
+        """
+        <div class="rt-section-band">
+          <div class="rt-section-title">Optional any-agent intake lab</div>
+          <div class="rt-muted">
+            Upload a manifest or use the sample agent to show the same generated-check
+            workflow on another agent surface. This is intentionally separate from the
+            three-minute presenter demo.
+          </div>
+        </div>
+        """
+    )
+    uploaded_state = _render_uploaded_agent_intake()
+    if not uploaded_state.get("available"):
+        return
+
+    upload_cols = st.columns([1.1, 1.3, 1.2])
+    with upload_cols[0]:
+        _render_uploaded_agent_profile_panel(uploaded_state)
+    with upload_cols[1]:
+        _render_uploaded_agent_generated_attacks_panel(uploaded_state)
+    with upload_cols[2]:
+        _render_uploaded_agent_red_gate_panel(uploaded_state)
+    _render_uploaded_agent_trace_replay_panel(uploaded_state)
+
+
+def _render_developer_inspection() -> None:
+    st.subheader("Support Story Deep Inspection")
+    _render_support_story_mode()
+    st.divider()
+    st.subheader("General Suite Developer Mode")
+    before = _load_optional_summary(DEFAULT_BEFORE_SUMMARY_PATH)
+    after = _load_optional_summary(DEFAULT_AFTER_SUMMARY_PATH)
+    _render_top_metrics(before, after)
+    _render_demo_mode_actions()
+    _render_generated_plan_panel(load_generated_plan_panel(ROOT))
+
+    left, middle, right = st.columns([1.3, 2.2, 2.2])
+    selected_attack = _render_attack_suite(left, before, after)
+    _render_flight_recorder(middle, selected_attack, before, after)
+    _render_patch_panel(right)
 
 def _render_cockpit_proof_cards(
     state: dict[str, Any],
