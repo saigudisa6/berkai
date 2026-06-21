@@ -13,7 +13,11 @@ from .assertions import (
 )
 from .attacks import Attack, all_attacks
 from .config import load_guardrails
-from .integrations import capture_failure_if_configured, write_summary_if_configured
+from .integrations import (
+    build_failure_event_context,
+    capture_failure_if_configured,
+    write_summary_if_configured,
+)
 from .paths import DEFAULT_GUARDRAILS_PATH, GENERATED_REGRESSIONS_PATH, PATCHES_ROOT, TRACES_ROOT
 from .policy import PolicyViolation
 from .recorder import FlightRecorder
@@ -33,6 +37,7 @@ class AttackResult:
     dangerous_tools_attempted: list[str] | None = None
     dangerous_tools_blocked: list[str] | None = None
     sentry_event_id: str | None = None
+    sentry_event_context: dict[str, Any] | None = None
     redis_stream_key: str | None = None
     redis_event_count: int = 0
     source: str = "builtin"
@@ -74,6 +79,10 @@ def run_suite(
     selected_attack_ids: list[str] | None = None,
     agent_config: AgentConfig | None = None,
     mode: str = "unknown",
+    summary_path: str | Path | None = None,
+    remediation_artifact_paths: list[str | Path] | None = None,
+    regression_artifact_paths: list[str | Path] | None = None,
+    scenario: str | None = None,
 ) -> RunReport:
     guardrails = load_guardrails(guardrails_path)
     agent_config = agent_config or AgentConfig()
@@ -89,14 +98,29 @@ def run_suite(
         if not selected or attack.id in selected
     ]
 
+    capture_summary_path = Path(summary_path) if summary_path else run_dir / "summary.json"
     results: list[AttackResult] = []
     for attack in attacks:
-        result = run_attack(attack, guardrails, run_id, run_dir, agent_config)
+        result = run_attack(
+            attack,
+            guardrails,
+            run_id,
+            run_dir,
+            agent_config,
+            mode=mode,
+            summary_path=capture_summary_path,
+            remediation_artifact_paths=remediation_artifact_paths,
+            regression_artifact_paths=regression_artifact_paths,
+            scenario=scenario,
+        )
         results.append(result)
 
     integrations = {
         "sentry_event_ids": [
             result.sentry_event_id for result in results if result.sentry_event_id
+        ],
+        "sentry_events": [
+            result.sentry_event_context for result in results if result.sentry_event_context
         ],
         "redis_stream_keys": sorted(
             {
@@ -127,6 +151,11 @@ def run_attack(
     run_id: str,
     run_dir: Path,
     agent_config: AgentConfig | None = None,
+    mode: str = "unknown",
+    summary_path: Path | None = None,
+    remediation_artifact_paths: list[str | Path] | None = None,
+    regression_artifact_paths: list[str | Path] | None = None,
+    scenario: str | None = None,
 ) -> AttackResult:
     agent_config = agent_config or AgentConfig()
     recorder = FlightRecorder(run_id, attack.id, attack.name)
@@ -207,19 +236,34 @@ def run_attack(
     )
     blocked_before_execution = bool(dangerous_blocked)
     sentry_event_id = None
+    sentry_event_context = None
     if status == "FAIL":
-        sentry_event_id = capture_failure_if_configured(
-            run_id=run_id,
-            attack_id=attack.id,
-            attack_name=attack.name,
-            failure_reason=reason,
-            trace_path=trace_path,
-            risky_tool_name=risky_tool,
-            agent=agent_config.label,
-            dangerous_tools_attempted=dangerous_attempted,
-            blocked_before_execution=blocked_before_execution,
-            attack_payload=attack.task,
+        sentry_dangerous_attempted = dangerous_attempted or (
+            [risky_tool] if risky_tool else []
         )
+        sentry_payload = {
+            "run_id": run_id,
+            "attack_id": attack.id,
+            "attack_name": attack.name,
+            "failure_reason": reason,
+            "trace_path": trace_path,
+            "risky_tool_name": risky_tool,
+            "agent": agent_config.label,
+            "dangerous_tools_attempted": sentry_dangerous_attempted,
+            "blocked_before_execution": blocked_before_execution,
+            "attack_payload": attack.task,
+            "summary_path": summary_path,
+            "remediation_artifact_paths": remediation_artifact_paths,
+            "regression_artifact_paths": regression_artifact_paths,
+            "scenario": scenario,
+            "run_type": mode,
+        }
+        sentry_event_id = capture_failure_if_configured(**sentry_payload)
+        if sentry_event_id:
+            sentry_event_context = build_failure_event_context(
+                event_id=sentry_event_id,
+                **sentry_payload,
+            )
 
     return AttackResult(
         id=attack.id,
@@ -233,6 +277,7 @@ def run_attack(
         dangerous_tools_attempted=dangerous_attempted,
         dangerous_tools_blocked=dangerous_blocked,
         sentry_event_id=sentry_event_id,
+        sentry_event_context=sentry_event_context,
         redis_stream_key=recorder.redis.stream_key if recorder.redis.enabled else None,
         redis_event_count=recorder.redis.event_count,
         source=attack.source,

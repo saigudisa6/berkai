@@ -216,6 +216,9 @@ Sentry is optional observability, not the release gate. GitHub CI still blocks
 the check when RedTeamCI finds unsafe agent behavior. When configured, Sentry
 receives security/observability events for failed attacks with redacted payload
 metadata, run ids, attack ids, dangerous tool tags, and trace paths.
+Support-story events also include the scenario, run type, GitHub run URL when
+available, blocked-before-execution status, summary path, and regression or
+remediation artifact paths when those artifacts exist.
 
 In GitHub Actions, configure the repository secret:
 
@@ -235,9 +238,18 @@ python -m pip install -e '.[integrations]'
 python -m redteamci.cli story support --step red
 ```
 
-The Support Story dashboard shows Sentry event IDs from the red summary when
-they exist. If Sentry is not configured, the dashboard shows a non-error note
-and `AGENT CERTIFIED` remains based only on the red/green proof.
+The Support Story dashboard shows Sentry configured/missing status, event IDs,
+tags, fingerprint, and artifact paths from the red summary/state when they
+exist. To enable a search-friendly link from the dashboard:
+
+```bash
+export SENTRY_BASE_URL=https://sentry.io
+export SENTRY_ORG=your-org
+export SENTRY_PROJECT=your-project
+```
+
+If Sentry is not configured, the dashboard shows a non-error note and
+`AGENT CERTIFIED` remains based only on the red/green proof.
 
 ## Commands
 

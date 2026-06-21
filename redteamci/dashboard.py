@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 try:
     import streamlit as st
@@ -467,13 +469,19 @@ def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
     if not isinstance(attack_pack, list):
         attack_pack = []
     artifacts = _support_story_artifacts(root)
+    red_sentry_event_ids = _sentry_event_ids(red_summary) or _run_sentry_event_ids(
+        state,
+        "red",
+    )
+    red_sentry_events = _sentry_events(red_summary) or _run_sentry_events(state, "red")
     return {
         "available": story_root.exists(),
         "state": state,
         "proof": proof,
         "red_summary": red_summary,
         "green_summary": green_summary,
-        "red_sentry_event_ids": _sentry_event_ids(red_summary),
+        "red_sentry_event_ids": red_sentry_event_ids,
+        "red_sentry_events": red_sentry_events,
         "attack_pack": attack_pack,
         "artifacts": artifacts,
     }
@@ -543,15 +551,76 @@ def collect_evidence_artifacts(root: Path = ROOT) -> list[dict[str, str]]:
 
 
 def _render_sentry_observability(state: dict[str, Any]) -> None:
-    event_ids = state.get("red_sentry_event_ids", [])
-    if event_ids:
-        for event_id in event_ids:
-            st.caption(f"Sentry event: {event_id}")
+    context = build_sentry_dashboard_context(state)
+    status = "configured" if context["configured"] else "missing"
+    st.caption(f"Sentry DSN: {status}")
+    if context["environment"]:
+        st.caption(f"Environment: {context['environment']}")
+    if context["release"]:
+        st.caption(f"Release: {context['release']}")
+
+    event_ids = context["event_ids"]
+    if not event_ids:
+        st.caption(
+            "No Sentry events recorded. Set SENTRY_DSN and install integration "
+            "dependencies to enable Sentry."
+        )
         return
-    st.caption(
-        "No Sentry events recorded. Set SENTRY_DSN and install integration "
-        "dependencies to enable Sentry."
+
+    for event_id in event_ids:
+        st.code(event_id)
+    if context["open_url"]:
+        st.link_button("Open in Sentry", context["open_url"])
+
+    with st.expander("Sentry proof context", expanded=True):
+        st.json(
+            {
+                "tags": context["tags"],
+                "fingerprint": context["fingerprint"],
+                "artifacts": context["artifact_paths"],
+            }
+        )
+
+
+def build_sentry_dashboard_context(
+    state: dict[str, Any],
+    environ: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    if environ is None:
+        environ = dict(os.environ)
+    events = state.get("red_sentry_events", [])
+    if not isinstance(events, list):
+        events = []
+    events = [event for event in events if isinstance(event, dict)]
+    event_ids = _dedupe(
+        [
+            *_string_list(state.get("red_sentry_event_ids")),
+            *[
+                str(event.get("event_id"))
+                for event in events
+                if event.get("event_id")
+            ],
+        ]
     )
+    primary = events[0] if events else {}
+    tags = primary.get("tags", {}) if isinstance(primary.get("tags"), dict) else {}
+    extra = primary.get("extra", {}) if isinstance(primary.get("extra"), dict) else {}
+    fingerprint = (
+        primary.get("fingerprint", [])
+        if isinstance(primary.get("fingerprint"), list)
+        else []
+    )
+    return {
+        "configured": bool(environ.get("SENTRY_DSN")),
+        "environment": environ.get("SENTRY_ENVIRONMENT", ""),
+        "release": environ.get("SENTRY_RELEASE", ""),
+        "event_ids": event_ids,
+        "events": events,
+        "tags": tags,
+        "fingerprint": fingerprint,
+        "artifact_paths": _sentry_artifact_paths(extra),
+        "open_url": _sentry_search_url(event_ids, environ),
+    }
 
 
 def _sentry_event_ids(summary: dict[str, Any] | None) -> list[str]:
@@ -564,6 +633,59 @@ def _sentry_event_ids(summary: dict[str, Any] | None) -> list[str]:
     if not isinstance(event_ids, list):
         return []
     return [str(event_id) for event_id in event_ids if event_id]
+
+
+def _sentry_events(summary: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not summary:
+        return []
+    integrations = summary.get("integrations", {})
+    if not isinstance(integrations, dict):
+        return []
+    events = integrations.get("sentry_events", [])
+    if not isinstance(events, list):
+        return []
+    return [event for event in events if isinstance(event, dict)]
+
+
+def _run_sentry_event_ids(state: dict[str, Any], phase: str) -> list[str]:
+    run = state.get(phase, {})
+    if not isinstance(run, dict):
+        return []
+    return _string_list(run.get("sentry_event_ids"))
+
+
+def _run_sentry_events(state: dict[str, Any], phase: str) -> list[dict[str, Any]]:
+    run = state.get(phase, {})
+    if not isinstance(run, dict):
+        return []
+    events = run.get("sentry_events", [])
+    if not isinstance(events, list):
+        return []
+    return [event for event in events if isinstance(event, dict)]
+
+
+def _sentry_artifact_paths(extra: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "trace_path": extra.get("trace_path", ""),
+        "summary_path": extra.get("summary_path", ""),
+        "remediation_artifact_paths": extra.get("remediation_artifact_paths", []),
+        "regression_artifact_paths": extra.get("regression_artifact_paths", []),
+    }
+
+
+def _sentry_search_url(event_ids: list[str], environ: dict[str, str]) -> str:
+    if not event_ids:
+        return ""
+    base_url = environ.get("SENTRY_BASE_URL", "").rstrip("/")
+    organization = environ.get("SENTRY_ORG", "")
+    project = environ.get("SENTRY_PROJECT", "")
+    if not base_url or not organization or not project:
+        return ""
+    query = f"event.id:{event_ids[0]}"
+    return (
+        f"{base_url}/organizations/{quote(organization)}/issues/"
+        f"?project={quote(project)}&query={quote(query)}"
+    )
 
 
 def load_story_trace(root: Path, phase: str, attack_id: str) -> dict[str, Any] | None:

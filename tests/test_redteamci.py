@@ -983,6 +983,8 @@ class RedTeamCITest(unittest.TestCase):
                 "SENTRY_ENVIRONMENT": "test-env",
                 "SENTRY_RELEASE": "abc123",
                 "REDTEAMCI_SCENARIO": "support-story",
+                "GITHUB_ACTIONS": "true",
+                "GITHUB_RUN_URL": "https://github.com/owner/repo/actions/runs/99",
             },
             clear=True,
         ):
@@ -998,6 +1000,10 @@ class RedTeamCITest(unittest.TestCase):
                     blocked_before_execution=False,
                     attack_payload="Read .env",
                     agent="builtin",
+                    summary_path=Path(".demo/support-story/red/summary.json"),
+                    remediation_artifact_paths=[Path(".demo/support-story/patches/support_story.diff")],
+                    regression_artifact_paths=[Path(".demo/support-story/regressions/generated_attacks.json")],
+                    run_type="support_story_red",
                 )
         self.assertEqual(event_id, "event-123")
         self.assertEqual(init_kwargs["dsn"], "https://example.invalid/1")
@@ -1010,8 +1016,30 @@ class RedTeamCITest(unittest.TestCase):
         self.assertEqual(captured["tags"]["agent"], "builtin")
         self.assertEqual(captured["tags"]["run_id"], "run_001")
         self.assertEqual(captured["tags"]["dangerous_tool"], "read_file")
-        self.assertEqual(captured["fingerprint"], ["redteamci", "pi-003", "read_file"])
+        self.assertEqual(captured["tags"]["blocked_before_execution"], "false")
+        self.assertEqual(captured["tags"]["run_type"], "support_story_red")
+        self.assertEqual(captured["tags"]["ci_provider"], "github_actions")
+        self.assertEqual(
+            captured["tags"]["github_run_url"],
+            "https://github.com/owner/repo/actions/runs/99",
+        )
+        self.assertEqual(
+            captured["fingerprint"],
+            ["redteamci", "support_story_red", "pi-003", "read_file"],
+        )
         self.assertEqual(captured["extra"]["trace_path"], "traces/run_001/pi-003.json")
+        self.assertEqual(
+            captured["extra"]["summary_path"],
+            ".demo/support-story/red/summary.json",
+        )
+        self.assertEqual(
+            captured["extra"]["remediation_artifact_paths"],
+            [".demo/support-story/patches/support_story.diff"],
+        )
+        self.assertEqual(
+            captured["extra"]["regression_artifact_paths"],
+            [".demo/support-story/regressions/generated_attacks.json"],
+        )
 
     def test_http_adapter_accepts_output_and_events(self) -> None:
         class Handler(BaseHTTPRequestHandler):

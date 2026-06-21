@@ -5,6 +5,7 @@ from pathlib import Path
 
 from redteamci.dashboard import (
     LEVEL_1_WARNING,
+    build_sentry_dashboard_context,
     load_generated_plan_panel,
     load_support_story_dashboard_state,
     onboarding_level_notice,
@@ -203,7 +204,33 @@ class DashboardHelperTest(unittest.TestCase):
                 {
                     "failed": 3,
                     "passed": 0,
-                    "integrations": {"sentry_event_ids": ["event-1", "event-2"]},
+                    "integrations": {
+                        "sentry_event_ids": ["event-1", "event-2"],
+                        "sentry_events": [
+                            {
+                                "event_id": "event-1",
+                                "tags": {
+                                    "scenario": "support-story",
+                                    "attack_id": "generated-refund-001",
+                                    "dangerous_tool": "issue_refund",
+                                    "blocked_before_execution": "false",
+                                },
+                                "fingerprint": [
+                                    "redteamci",
+                                    "support_story_red",
+                                    "generated-refund-001",
+                                    "issue_refund",
+                                ],
+                                "extra": {
+                                    "trace_path": ".demo/support-story/red/traces/run_001/generated-refund-001.json",
+                                    "summary_path": ".demo/support-story/red/summary.json",
+                                    "regression_artifact_paths": [
+                                        ".demo/support-story/regressions/generated_attacks.json"
+                                    ],
+                                },
+                            }
+                        ],
+                    },
                 },
             )
             write_json(story / "green" / "summary.json", {"failed": 0, "passed": 4})
@@ -218,6 +245,26 @@ class DashboardHelperTest(unittest.TestCase):
         self.assertTrue(support_story_certified(state["proof"]))
         self.assertEqual(state["red_summary"]["failed"], 3)
         self.assertEqual(state["red_sentry_event_ids"], ["event-1", "event-2"])
+        context = build_sentry_dashboard_context(
+            state,
+            {
+                "SENTRY_DSN": "https://example.invalid/1",
+                "SENTRY_ENVIRONMENT": "local-demo",
+                "SENTRY_RELEASE": "abc123",
+                "SENTRY_BASE_URL": "https://sentry.example",
+                "SENTRY_ORG": "demo-org",
+                "SENTRY_PROJECT": "redteamci",
+            },
+        )
+        self.assertTrue(context["configured"])
+        self.assertEqual(context["event_ids"], ["event-1", "event-2"])
+        self.assertEqual(context["tags"]["attack_id"], "generated-refund-001")
+        self.assertEqual(
+            context["fingerprint"],
+            ["redteamci", "support_story_red", "generated-refund-001", "issue_refund"],
+        )
+        self.assertIn("event.id%3Aevent-1", context["open_url"])
+        self.assertFalse(build_sentry_dashboard_context(state, {})["configured"])
         self.assertEqual(state["green_summary"]["passed"], 4)
         self.assertEqual(state["attack_pack"], [{"id": "generated-refund-001"}])
         self.assertIn(

@@ -110,6 +110,7 @@ def run_support_story_red_local() -> StoryStepResult:
                 failed=len(report.failed),
                 passed=len(report.passed),
                 ok=bool(report.failed),
+                run_summary=report.summary,
             ),
         }
     )
@@ -175,6 +176,7 @@ def run_support_story_green_local() -> StoryStepResult:
                 failed=len(report.failed),
                 passed=len(report.passed),
                 ok=not report.failed,
+                run_summary=report.summary,
             ),
             "proof": proof,
         }
@@ -306,6 +308,15 @@ def _run_support_story_gate(
             timeout=10,
         ),
         mode=f"support_story_{phase}",
+        summary_path=phase_dir / "summary.json",
+        remediation_artifact_paths=_existing_paths(
+            [
+                SUPPORT_STORY_PATCHES_DIR / "support_story_summary.json",
+                SUPPORT_STORY_PATCHES_DIR / "support_story.diff",
+            ]
+        ),
+        regression_artifact_paths=_existing_paths([SUPPORT_STORY_REGRESSIONS]),
+        scenario="support-story",
     )
     write_summary(report.summary, phase_dir / "summary.json")
     write_junit_summary(report.summary, phase_dir / "results.junit.xml")
@@ -360,13 +371,27 @@ def _result_dict(result: StoryStepResult) -> dict[str, Any]:
     }
 
 
-def _run_state(*, summary: Path, failed: int, passed: int, ok: bool) -> dict[str, Any]:
-    return {
+def _run_state(
+    *,
+    summary: Path,
+    failed: int,
+    passed: int,
+    ok: bool,
+    run_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    state = {
         "summary": _rel(summary),
         "failed": failed,
         "passed": passed,
         "ok": ok,
     }
+    sentry_ids = _sentry_event_ids(run_summary)
+    sentry_events = _sentry_events(run_summary)
+    if sentry_ids:
+        state["sentry_event_ids"] = sentry_ids
+    if sentry_events:
+        state["sentry_events"] = sentry_events
+    return state
 
 
 def _rel(path: Path | str) -> str:
@@ -419,3 +444,31 @@ def _attack_status(summary: dict[str, Any], attack_id: str) -> str:
         if isinstance(attack, dict) and attack.get("id") == attack_id:
             return str(attack.get("status", ""))
     return ""
+
+
+def _existing_paths(paths: list[Path]) -> list[Path]:
+    return [path for path in paths if path.exists()]
+
+
+def _sentry_event_ids(summary: dict[str, Any] | None) -> list[str]:
+    if not summary:
+        return []
+    integrations = summary.get("integrations", {})
+    if not isinstance(integrations, dict):
+        return []
+    event_ids = integrations.get("sentry_event_ids", [])
+    if not isinstance(event_ids, list):
+        return []
+    return [str(event_id) for event_id in event_ids if event_id]
+
+
+def _sentry_events(summary: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not summary:
+        return []
+    integrations = summary.get("integrations", {})
+    if not isinstance(integrations, dict):
+        return []
+    events = integrations.get("sentry_events", [])
+    if not isinstance(events, list):
+        return []
+    return [event for event in events if isinstance(event, dict)]
