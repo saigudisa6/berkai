@@ -34,6 +34,7 @@ from .paths import (
 from .report import generate_report
 from .runner import RunReport, latest_run_dir, run_suite
 from .summary import write_junit_summary, write_sarif_summary, write_summary
+from .trace_viewer import format_trace_timeline, load_trace
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
         return latest_command(args)
     if args.command == "report":
         return report_command(args)
+    if args.command == "trace":
+        return trace_command(args)
 
     parser.print_help()
     return 1
@@ -157,6 +160,12 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--before", default=str(DEFAULT_BEFORE_SUMMARY_PATH))
     report.add_argument("--after", default=str(DEFAULT_AFTER_SUMMARY_PATH))
     report.add_argument("--output", default=str(DEFAULT_REPORT_PATH))
+
+    trace = subparsers.add_parser("trace")
+    trace.add_argument("attack_id")
+    trace.add_argument("--run-id")
+    trace.add_argument("--traces-root", default=str(TRACES_ROOT))
+    trace.add_argument("--json", action="store_true")
 
     return parser
 
@@ -433,6 +442,24 @@ def latest_command(args: argparse.Namespace) -> int:
 def report_command(args: argparse.Namespace) -> int:
     output = generate_report(before_path=args.before, after_path=args.after, output_path=args.output)
     print(f"Wrote {output}")
+    return 0
+
+
+def trace_command(args: argparse.Namespace) -> int:
+    try:
+        trace = load_trace(
+            args.attack_id,
+            traces_root=args.traces_root,
+            run_id=args.run_id,
+        )
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    if args.json:
+        print(json.dumps(trace, indent=2))
+    else:
+        print(format_trace_timeline(trace))
     return 0
 
 

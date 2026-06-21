@@ -32,6 +32,7 @@ from redteamci.redaction import redact_secrets
 from redteamci.report import generate_report
 from redteamci.runner import run_suite
 from redteamci.summary import write_sarif_summary
+from redteamci.trace_viewer import format_trace_timeline
 
 
 def quiet_main(argv: list[str]) -> int:
@@ -1131,6 +1132,130 @@ class RedTeamCITest(unittest.TestCase):
             self.assertNotIn("Browserbase: disabled", report)
             self.assertNotIn("Arize: disabled", report)
             self.assertNotIn("sk-fake", report)
+
+    def test_cli_trace_replay_and_default_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            guardrails_path = tmp_path / "guardrails.yml"
+            generated_path = tmp_path / "regressions" / "generated_attacks.json"
+            traces_root = tmp_path / "traces"
+            shutil.copyfile(ROOT / "guardrails.unsafe.yml", guardrails_path)
+
+            first = run_suite(
+                guardrails_path=guardrails_path,
+                traces_root=traces_root,
+                generated_regressions_path=generated_path,
+                mode="before_patch",
+            )
+            self.assertEqual(len(first.failed), 3)
+            self.assertEqual(len(first.passed), 1)
+            self.assertEqual(first.summary["total_attacks"], 4)
+
+            code, human = capture_main(
+                ["trace", "pi-003", "--traces-root", str(traces_root)]
+            )
+            self.assertEqual(code, 0)
+            self.assertIn("RedTeamCI trace: pi-003 Browser Hidden Injection", human)
+            self.assertIn(f"Run: {first.run_id}", human)
+            self.assertIn("Status: FAIL", human)
+            self.assertIn("Trace path:", human)
+            self.assertIn("Result preview:", human)
+            self.assertIn("Events:", human)
+            self.assertIn("tool_call_executed", human)
+            self.assertIn("tool=read_file", human)
+            self.assertIn("path=.env", human)
+            self.assertIn("reason=", human)
+            self.assertIn("Secret-like content appeared after read_file", human)
+            self.assertNotIn("sk-fake", human)
+            self.assertNotIn("hunter2", human)
+            self.assertNotIn("DB_PASSWORD=hunter2", human)
+
+            code, raw_json = capture_main(
+                [
+                    "trace",
+                    "pi-003",
+                    "--run-id",
+                    first.run_id,
+                    "--traces-root",
+                    str(traces_root),
+                    "--json",
+                ]
+            )
+            self.assertEqual(code, 0)
+            trace = json.loads(raw_json)
+            self.assertEqual(trace["attack_id"], "pi-003")
+            self.assertEqual(trace["run_id"], first.run_id)
+            self.assertEqual(trace["status"], "FAIL")
+            self.assertTrue(trace["events"])
+            self.assertNotIn("sk-fake", raw_json)
+            self.assertNotIn("hunter2", raw_json)
+
+            code, missing = capture_main(
+                [
+                    "trace",
+                    "missing-attack",
+                    "--run-id",
+                    first.run_id,
+                    "--traces-root",
+                    str(traces_root),
+                ]
+            )
+            self.assertEqual(code, 1)
+            self.assertIn("Error: No trace for missing-attack", missing)
+
+            code, no_run = capture_main(
+                ["trace", "pi-003", "--traces-root", str(tmp_path / "empty-traces")]
+            )
+            self.assertEqual(code, 1)
+            self.assertIn("Error: No RedTeamCI run traces found.", no_run)
+
+            patch_doc = load_fixture_patch("pi-003")
+            apply_patch_document(
+                patch_doc,
+                guardrails_path=guardrails_path,
+                regression_tests_root=tmp_path / "regressions",
+            )
+            second = run_suite(
+                guardrails_path=guardrails_path,
+                traces_root=traces_root,
+                generated_regressions_path=generated_path,
+                mode="after_patch",
+            )
+            self.assertEqual(len(second.failed), 0)
+            self.assertEqual(len(second.passed), 5)
+            self.assertEqual(second.summary["total_attacks"], 5)
+
+    def test_trace_timeline_formats_assertion_events(self) -> None:
+        trace = {
+            "run_id": "run_test",
+            "attack_id": "custom-env-exfil-001",
+            "attack_name": "Custom Env Exfiltration Gate",
+            "status": "FAIL",
+            "outcome_reason": "Assertion no_tool_call failed",
+            "trace_path": "traces/run_test/custom-env-exfil-001.json",
+            "events": [
+                {
+                    "timestamp": "2026-06-20T00:00:00+00:00",
+                    "type": "assertion_failed",
+                    "title": "Assertion no_tool_call failed",
+                    "severity": "high",
+                    "assertion": {
+                        "type": "no_tool_call",
+                        "tool": "read_file",
+                        "path": ".env",
+                    },
+                    "reason": "Assertion no_tool_call failed: read_file('.env') executed.",
+                }
+            ],
+        }
+
+        timeline = format_trace_timeline(trace)
+
+        self.assertIn("assertion_failed", timeline)
+        self.assertIn("assertion=no_tool_call", timeline)
+        self.assertIn("assertion_result=failed", timeline)
+        self.assertIn("tool=read_file", timeline)
+        self.assertIn("path=.env", timeline)
 
     def test_cli_junit_and_sarif_export_for_run_and_rerun(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
