@@ -210,6 +210,35 @@ python -m redteamci.cli dashboard
 Use `./demo_story.sh` to install dashboard dependencies and launch the app, or
 `./demo_support_story.sh` to generate local proof artifacts before launching.
 
+### Optional Sentry Observability
+
+Sentry is optional observability, not the release gate. GitHub CI still blocks
+the check when RedTeamCI finds unsafe agent behavior. When configured, Sentry
+receives security/observability events for failed attacks with redacted payload
+metadata, run ids, attack ids, dangerous tool tags, and trace paths.
+
+In GitHub Actions, configure the repository secret:
+
+```text
+SENTRY_DSN
+```
+
+The workflow passes the DSN through environment variables only; it is never
+hardcoded. For local use:
+
+```bash
+export SENTRY_DSN=...
+export SENTRY_ENVIRONMENT=local-demo
+export SENTRY_RELEASE=$(git rev-parse HEAD)
+export REDTEAMCI_SCENARIO=support-story
+python -m pip install -e '.[integrations]'
+python -m redteamci.cli story support --step red
+```
+
+The Support Story dashboard shows Sentry event IDs from the red summary when
+they exist. If Sentry is not configured, the dashboard shows a non-error note
+and `AGENT CERTIFIED` remains based only on the red/green proof.
+
 ## Commands
 
 ```bash

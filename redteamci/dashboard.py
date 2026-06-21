@@ -175,6 +175,8 @@ def _render_support_story_mode() -> None:
     with left:
         st.subheader("Final Proof")
         _render_proof_rows(proof)
+        st.subheader("Observability")
+        _render_sentry_observability(state)
         st.subheader("Artifacts")
         if state["artifacts"]:
             for artifact in state["artifacts"]:
@@ -471,6 +473,7 @@ def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
         "proof": proof,
         "red_summary": red_summary,
         "green_summary": green_summary,
+        "red_sentry_event_ids": _sentry_event_ids(red_summary),
         "attack_pack": attack_pack,
         "artifacts": artifacts,
     }
@@ -537,6 +540,30 @@ def collect_evidence_artifacts(root: Path = ROOT) -> list[dict[str, str]]:
         for label, path in artifacts
         if path.exists()
     ]
+
+
+def _render_sentry_observability(state: dict[str, Any]) -> None:
+    event_ids = state.get("red_sentry_event_ids", [])
+    if event_ids:
+        for event_id in event_ids:
+            st.caption(f"Sentry event: {event_id}")
+        return
+    st.caption(
+        "No Sentry events recorded. Set SENTRY_DSN and install integration "
+        "dependencies to enable Sentry."
+    )
+
+
+def _sentry_event_ids(summary: dict[str, Any] | None) -> list[str]:
+    if not summary:
+        return []
+    integrations = summary.get("integrations", {})
+    if not isinstance(integrations, dict):
+        return []
+    event_ids = integrations.get("sentry_event_ids", [])
+    if not isinstance(event_ids, list):
+        return []
+    return [str(event_id) for event_id in event_ids if event_id]
 
 
 def load_story_trace(root: Path, phase: str, attack_id: str) -> dict[str, Any] | None:

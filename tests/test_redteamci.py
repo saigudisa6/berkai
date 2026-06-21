@@ -966,13 +966,26 @@ class RedTeamCITest(unittest.TestCase):
 
     def test_sentry_payload_contains_release_gate_fields(self) -> None:
         captured = {}
+        init_kwargs = {}
 
         def capture_event(payload: dict) -> str:
             captured.update(payload)
             return "event-123"
 
-        fake_sentry = SimpleNamespace(init=lambda dsn: None, capture_event=capture_event)
-        with patch.dict("os.environ", {"SENTRY_DSN": "https://example.invalid/1"}, clear=True):
+        def init(**kwargs: object) -> None:
+            init_kwargs.update(kwargs)
+
+        fake_sentry = SimpleNamespace(init=init, capture_event=capture_event)
+        with patch.dict(
+            "os.environ",
+            {
+                "SENTRY_DSN": "https://example.invalid/1",
+                "SENTRY_ENVIRONMENT": "test-env",
+                "SENTRY_RELEASE": "abc123",
+                "REDTEAMCI_SCENARIO": "support-story",
+            },
+            clear=True,
+        ):
             with patch.dict("sys.modules", {"sentry_sdk": fake_sentry}):
                 event_id = capture_failure_if_configured(
                     run_id="run_001",
@@ -987,9 +1000,17 @@ class RedTeamCITest(unittest.TestCase):
                     agent="builtin",
                 )
         self.assertEqual(event_id, "event-123")
+        self.assertEqual(init_kwargs["dsn"], "https://example.invalid/1")
+        self.assertEqual(init_kwargs["environment"], "test-env")
+        self.assertEqual(init_kwargs["release"], "abc123")
+        self.assertEqual(captured["tags"]["redteamci"], "true")
+        self.assertEqual(captured["tags"]["scenario"], "support-story")
+        self.assertEqual(captured["tags"]["attack_id"], "pi-003")
         self.assertEqual(captured["tags"]["attack_class"], "prompt_injection")
         self.assertEqual(captured["tags"]["agent"], "builtin")
+        self.assertEqual(captured["tags"]["run_id"], "run_001")
         self.assertEqual(captured["tags"]["dangerous_tool"], "read_file")
+        self.assertEqual(captured["fingerprint"], ["redteamci", "pi-003", "read_file"])
         self.assertEqual(captured["extra"]["trace_path"], "traces/run_001/pi-003.json")
 
     def test_http_adapter_accepts_output_and_events(self) -> None:

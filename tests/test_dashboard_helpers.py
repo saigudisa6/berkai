@@ -198,7 +198,14 @@ class DashboardHelperTest(unittest.TestCase):
                     }
                 },
             )
-            write_json(story / "red" / "summary.json", {"failed": 3, "passed": 0})
+            write_json(
+                story / "red" / "summary.json",
+                {
+                    "failed": 3,
+                    "passed": 0,
+                    "integrations": {"sentry_event_ids": ["event-1", "event-2"]},
+                },
+            )
             write_json(story / "green" / "summary.json", {"failed": 0, "passed": 4})
             write_json(
                 story / "plan" / "generated_support_attacks.json",
@@ -210,6 +217,7 @@ class DashboardHelperTest(unittest.TestCase):
         self.assertTrue(state["available"])
         self.assertTrue(support_story_certified(state["proof"]))
         self.assertEqual(state["red_summary"]["failed"], 3)
+        self.assertEqual(state["red_sentry_event_ids"], ["event-1", "event-2"])
         self.assertEqual(state["green_summary"]["passed"], 4)
         self.assertEqual(state["attack_pack"], [{"id": "generated-refund-001"}])
         self.assertIn(

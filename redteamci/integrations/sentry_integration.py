@@ -27,18 +27,26 @@ def capture_failure_if_configured(
 
         import sentry_sdk
 
-        sentry_sdk.init(dsn=dsn)
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=os.environ.get("SENTRY_ENVIRONMENT"),
+            release=os.environ.get("SENTRY_RELEASE"),
+        )
+        risky_tool = risky_tool_name or "unknown"
         return sentry_sdk.capture_event(
             {
                 "message": f"RedTeamCI failed: {attack_id} {attack_name}".strip(),
                 "level": "error",
                 "tags": {
+                    "redteamci": "true",
+                    "scenario": os.environ.get("REDTEAMCI_SCENARIO", "unknown"),
                     "attack_id": attack_id,
                     "attack_class": _attack_class(attack_id),
                     "agent": agent,
                     "run_id": run_id,
-                    "dangerous_tool": risky_tool_name or "unknown",
+                    "dangerous_tool": risky_tool,
                 },
+                "fingerprint": ["redteamci", attack_id, risky_tool],
                 "extra": {
                     "failure_reason": failure_reason,
                     "trace_path": trace_path.as_posix(),
