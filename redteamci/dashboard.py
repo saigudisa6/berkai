@@ -74,6 +74,29 @@ PRESENTER_ATTACKS = [
 ]
 PRESENTER_CAPABILITIES = ["Refunds", "Email", "Customer Data", "PII"]
 DETERMINISTIC_DEMO_PROOF_STEPS = ["prepare", "plan", "red", "remediate", "green"]
+DEMO_PROOF_STEP_COPY = {
+    "prepare": (
+        "Prepare isolated workspace",
+        "Resets .demo/support-story so the judges see the full pipeline start clean.",
+    ),
+    "plan": (
+        "Generate attacks from the agent profile",
+        "Profiles refunds, email, customer data, and PII into runnable security checks.",
+    ),
+    "red": (
+        "Run the red gate",
+        "Proves the support agent can execute the unsafe refund before remediation.",
+    ),
+    "remediate": (
+        "Create remediation artifact and regression",
+        "Applies the guardrail patch and writes the regression that prevents "
+        "this exploit from returning.",
+    ),
+    "green": (
+        "Run the green proof",
+        "Replays the same attack and certifies that the refund is blocked before tool execution.",
+    ),
+}
 PRESENTER_REFUND_AMOUNT = 500
 
 
@@ -179,6 +202,30 @@ def _inject_presenter_styles() -> None:
         div[data-testid="stButton"] button:hover {
           border-color: #2563eb;
           color: #1d4ed8;
+        }
+        .element-container,
+        div[data-testid="column"] {
+          min-width: 0;
+        }
+        div[data-testid="stMetric"],
+        div[data-testid="stMetric"] * {
+          max-width: 100%;
+          overflow: visible !important;
+          text-overflow: clip !important;
+          white-space: normal !important;
+          overflow-wrap: anywhere;
+        }
+        div[data-testid="stCodeBlock"] pre,
+        div[data-testid="stCodeBlock"] code,
+        pre,
+        code {
+          white-space: pre-wrap !important;
+          overflow-wrap: anywhere !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"],
+        div[data-testid="stVerticalBlockBorderWrapper"] p,
+        div[data-testid="stVerticalBlockBorderWrapper"] span {
+          overflow-wrap: anywhere;
         }
         .rt-hero {
           background: #fbfdff;
@@ -569,8 +616,33 @@ def deterministic_demo_proof_commands() -> list[list[str]]:
 
 
 def run_deterministic_demo_proof() -> None:
-    for command in deterministic_demo_proof_commands():
+    commands = deterministic_demo_proof_commands()
+    for index, command in enumerate(commands, start=1):
+        step = command[-1]
+        title, description = DEMO_PROOF_STEP_COPY.get(step, (step, ""))
+        st.markdown(f"**{index}. {title}**")
+        if description:
+            st.caption(description)
         run_cli(command)
+    st.success("Pipeline complete. Click Load Latest Proof to refresh the proof panels.")
+
+
+def _render_presenter_status_value(column: Any, label: str, value: str) -> None:
+    with column:
+        with st.container(border=True):
+            st.caption(label)
+            st.markdown(f"**{value}**")
+
+
+def _render_presenter_command_output(
+    title: str,
+    description: str,
+    command: list[str],
+) -> None:
+    with st.expander(title, expanded=True):
+        st.caption(description)
+        run_cli(command)
+        st.success("Run complete. Click Load Latest Proof to refresh the proof panels.")
 
 
 def _render_presenter_stepper() -> None:
@@ -1029,45 +1101,69 @@ def _render_classic_presenter_header(
 
     github_connected = github_available()[0]
     sentry_context = build_sentry_dashboard_context(state)
-    status_cols = st.columns(5)
-    status_cols[0].metric("Scenario", "Customer Support Agent")
-    status_cols[1].metric("Proof", readiness["label"])
-    status_cols[2].metric("Release gate", "Local proof active")
-    status_cols[3].metric(
+    status_cols = st.columns([1.35, 1.0, 1.2])
+    _render_presenter_status_value(status_cols[0], "Scenario", "Customer Support Agent")
+    _render_presenter_status_value(status_cols[1], "Proof", readiness["label"])
+    _render_presenter_status_value(status_cols[2], "Release gate", "Local proof active")
+    integration_cols = st.columns(2)
+    _render_presenter_status_value(
+        integration_cols[0],
         "GitHub CI",
         "connected" if github_connected else "not connected",
     )
-    status_cols[4].metric(
+    _render_presenter_status_value(
+        integration_cols[1],
         "Sentry",
         "optional, configured" if sentry_context["configured"] else "optional, not configured",
     )
 
     if readiness["status"] == "ready":
-        st.success("DEMO READY: red exploit, remediation artifact, generated regression, and green proof are complete.")
+        st.success(
+            "DEMO READY: red exploit, remediation artifact, generated regression, "
+            "and green proof are complete."
+        )
     elif readiness["status"] == "partial":
-        st.warning("INCOMPLETE: proof artifacts exist, but the full certification chain is not complete yet.")
+        st.warning(
+            "INCOMPLETE: proof artifacts exist, but the full certification chain "
+            "is not complete yet."
+        )
     else:
         st.info("NO RUN YET: generate demo proof to create the local certification chain.")
 
 
 def _render_classic_presenter_actions() -> None:
-    cols = st.columns(5)
-    if cols[0].button("Load Latest Proof", key="classic_presenter_load", use_container_width=True):
+    top_cols = st.columns(3)
+    if top_cols[0].button(
+        "Load Latest Proof",
+        key="classic_presenter_load",
+        use_container_width=True,
+    ):
         st.rerun()
-    if cols[1].button(
+    if top_cols[1].button(
         "Generate Demo Proof",
         key="classic_presenter_generate_demo_proof",
         use_container_width=True,
     ):
-        with st.spinner("Generating deterministic demo proof..."):
-            run_deterministic_demo_proof()
-        st.rerun()
-    if cols[2].button("Run Red Gate", key="classic_presenter_run_red", use_container_width=True):
-        run_cli(["story", "support", "--step", "red"])
-        st.rerun()
+        with st.expander("Live pipeline output", expanded=True):
+            with st.spinner("Generating deterministic demo proof..."):
+                run_deterministic_demo_proof()
+    if top_cols[2].button(
+        "Run Red Gate",
+        key="classic_presenter_run_red",
+        use_container_width=True,
+    ):
+        _render_presenter_command_output(
+            "Red gate output",
+            "Runs the unsafe support-agent scenario and should fail because the refund executes.",
+            ["story", "support", "--step", "red"],
+        )
 
-    strict_live = st.checkbox("Strict live Claude", key="classic_presenter_strict_live")
-    if cols[3].button(
+    bottom_cols = st.columns(3)
+    strict_live = bottom_cols[0].checkbox(
+        "Strict live Claude",
+        key="classic_presenter_strict_live",
+    )
+    if bottom_cols[1].button(
         "Run Live Claude",
         key="classic_presenter_run_live_claude",
         use_container_width=True,
@@ -1077,26 +1173,30 @@ def _render_classic_presenter_actions() -> None:
             args.append("--strict-claude-code")
         else:
             args.append("--fixture-fallback")
-        run_cli(args)
-        st.rerun()
-    if cols[4].button("Run Green Proof", key="classic_presenter_run_green", use_container_width=True):
-        run_cli(["story", "support", "--step", "green"])
-        st.rerun()
+        _render_presenter_command_output(
+            "Live Claude remediation output",
+            "Asks Claude Code for a validated remediation proposal, then applies it "
+            "or falls back to the fixture when allowed.",
+            args,
+        )
+    if bottom_cols[2].button(
+        "Run Green Proof",
+        key="classic_presenter_run_green",
+        use_container_width=True,
+    ):
+        _render_presenter_command_output(
+            "Green proof output",
+            "Replays the attack after remediation and should pass only if the refund "
+            "is blocked before execution.",
+            ["story", "support", "--step", "green"],
+        )
 
 
 def _render_classic_presenter_stepper() -> None:
-    labels = [
-        "Agent Profile",
-        "Generated Attacks",
-        "Red Gate",
-        "Trace Replay",
-        "Sentry Incident",
-        "Claude Remediation",
-        "Green Proof",
-    ]
-    cols = st.columns(len(labels))
-    for col, label in zip(cols, labels):
-        col.caption(label)
+    st.caption(
+        "Pipeline: Agent Profile -> Generated Attacks -> Red Gate -> Trace Replay -> "
+        "Sentry Incident -> Claude Remediation -> Green Proof"
+    )
 
 
 def _render_classic_agent_profile_panel() -> None:
@@ -1239,17 +1339,30 @@ def _render_classic_claude_remediation_panel(root: Path, state: dict[str, Any]) 
         st.caption("Guardrail patch: high-value refunds require approval")
         st.caption("Generated regression: regression-generated-refund-001")
 
-        tile_cols = st.columns(4)
-        _render_proof_tile(tile_cols[0], "Prompt artifact", bool(prompt_path and prompt_path.exists()))
+        first_tile_cols = st.columns(2)
+        second_tile_cols = st.columns(2)
+        _render_proof_tile(
+            first_tile_cols[0],
+            "Prompt artifact",
+            bool(prompt_path and prompt_path.exists()),
+        )
         proposal_or_fixture = bool(
             proposal_path and proposal_path.exists()
             or summary.get("fixture")
             or summary.get("source") == "fixture"
         )
-        _render_proof_tile(tile_cols[1], "Proposal / fixture artifact", proposal_or_fixture)
-        _render_proof_tile(tile_cols[2], "Guardrail diff", bool(diff_path and diff_path.exists()))
         _render_proof_tile(
-            tile_cols[3],
+            first_tile_cols[1],
+            "Proposal / fixture artifact",
+            proposal_or_fixture,
+        )
+        _render_proof_tile(
+            second_tile_cols[0],
+            "Guardrail diff",
+            bool(diff_path and diff_path.exists()),
+        )
+        _render_proof_tile(
+            second_tile_cols[1],
             "Generated regression",
             bool(regression_path and regression_path.exists()),
         )
@@ -1282,18 +1395,33 @@ def _render_classic_green_proof_panel(
     green_summary = state.get("green_summary") or {}
     with st.container(border=True):
         st.subheader("Green Proof")
-        cols = st.columns(5)
-        cols[0].metric("Green gate", _summary_counts(green_summary))
-        cols[1].metric(
+        top_cols = st.columns(3)
+        _render_presenter_status_value(
+            top_cols[0],
+            "Green gate",
+            _summary_counts(green_summary),
+        )
+        _render_presenter_status_value(
+            top_cols[1],
             "generated-refund-001",
             _attack_status_label(green_summary, "generated-refund-001"),
         )
-        cols[2].metric(
+        _render_presenter_status_value(
+            top_cols[2],
             "regression-generated-refund-001",
             _attack_status_label(green_summary, "regression-generated-refund-001"),
         )
-        cols[3].metric("Refund attempted", _yes_no(proof.get("green_refund_attempted")))
-        cols[4].metric("Blocked before execution", _yes_no(proof.get("green_refund_blocked")))
+        bottom_cols = st.columns(2)
+        _render_presenter_status_value(
+            bottom_cols[0],
+            "Refund attempted",
+            _yes_no(proof.get("green_refund_attempted")),
+        )
+        _render_presenter_status_value(
+            bottom_cols[1],
+            "Blocked before execution",
+            _yes_no(proof.get("green_refund_blocked")),
+        )
         if readiness["status"] == "ready":
             st.success("AGENT CERTIFIED")
         else:
