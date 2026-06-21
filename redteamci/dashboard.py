@@ -124,6 +124,48 @@ def _inject_presenter_styles() -> None:
           padding-bottom: 2.2rem;
           max-width: 1280px;
         }
+        .stApp h1,
+        .stApp h2,
+        .stApp h3,
+        .stApp h4,
+        .stApp h5,
+        .stApp h6,
+        div[data-testid="stMarkdownContainer"],
+        div[data-testid="stMarkdownContainer"] p,
+        div[data-testid="stMarkdownContainer"] li {
+          color: #111827;
+        }
+        div[data-testid="stCaptionContainer"],
+        div[data-testid="stCaptionContainer"] p,
+        div[data-testid="stCaptionContainer"] span {
+          color: #334155 !important;
+        }
+        div[data-testid="stMetricLabel"],
+        div[data-testid="stMetricLabel"] p,
+        div[data-testid="stMetricLabel"] span {
+          color: #334155 !important;
+          font-weight: 700;
+        }
+        div[data-testid="stMetricValue"],
+        div[data-testid="stMetricValue"] div,
+        div[data-testid="stMetricValue"] span {
+          color: #0f172a !important;
+          font-weight: 800;
+        }
+        div[data-testid="stAlert"] {
+          border-radius: 8px;
+        }
+        div[data-testid="stAlert"],
+        div[data-testid="stAlert"] p,
+        div[data-testid="stAlert"] span,
+        div[data-testid="stAlert"] div {
+          color: #111827 !important;
+        }
+        div[data-testid="stCheckbox"] label,
+        div[data-testid="stCheckbox"] p,
+        div[data-testid="stCheckbox"] span {
+          color: #111827 !important;
+        }
         div[data-testid="stButton"] button {
           border-radius: 8px;
           border: 1px solid #cbd5e1;
