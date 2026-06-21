@@ -144,6 +144,13 @@ def load_uploaded_agent_state(root: Path = ROOT) -> dict[str, Any]:
     }
 
 
+def clear_uploaded_agent_state(root: Path = ROOT) -> dict[str, Any]:
+    upload_root = Path(root) / UPLOADED_AGENT_RELATIVE_ROOT
+    if upload_root.exists():
+        shutil.rmtree(upload_root)
+    return _empty_state()
+
+
 def uploaded_agent_run_args(state: dict[str, Any]) -> list[str]:
     submission = state.get("submission") if isinstance(state, dict) else {}
     if not isinstance(submission, dict):

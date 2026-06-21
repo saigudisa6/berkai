@@ -8,6 +8,7 @@ from pathlib import Path
 
 from redteamci.uploads import (
     UploadedAgentError,
+    clear_uploaded_agent_state,
     ingest_uploaded_agent,
     uploaded_agent_run_args,
 )
@@ -65,6 +66,21 @@ sensitive_resources:
         self.assertTrue(state["runnable"])
         self.assertEqual(state["tools"], [])
         self.assertEqual(state["attack_ids"], ["generated-safe-001"])
+
+    def test_clear_uploaded_agent_state_removes_staged_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state = ingest_uploaded_agent(
+                "agent.py",
+                b"print('not a redteamci cli contract')\n",
+                root=root,
+            )
+            self.assertTrue(Path(state["submission"]["upload_root"]).exists())
+
+            cleared = clear_uploaded_agent_state(root)
+            self.assertFalse(Path(state["submission"]["upload_root"]).exists())
+
+        self.assertFalse(cleared["available"])
 
     def test_zip_path_traversal_is_rejected(self) -> None:
         payload = io.BytesIO()

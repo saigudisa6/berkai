@@ -40,6 +40,7 @@ from redteamci.github_actions import (
 from redteamci.summary import load_summary
 from redteamci.uploads import (
     UploadedAgentError,
+    clear_uploaded_agent_state,
     ingest_uploaded_agent,
     load_uploaded_agent_state,
     uploaded_agent_run_args,
@@ -1142,7 +1143,13 @@ def _render_classic_presenter_header(
 
 
 def _render_uploaded_agent_intake() -> None:
-    state = load_uploaded_agent_state(ROOT)
+    if "uploaded_agent_active" not in st.session_state:
+        st.session_state["uploaded_agent_active"] = False
+    state = (
+        load_uploaded_agent_state(ROOT)
+        if st.session_state["uploaded_agent_active"]
+        else {"available": False}
+    )
     with st.container(border=True):
         st.subheader("Agent Intake")
         st.caption("Drop an agent manifest, zip bundle, OpenAPI JSON, trace, or source file.")
@@ -1156,10 +1163,11 @@ def _render_uploaded_agent_intake() -> None:
         if uploaded is not None:
             try:
                 state = ingest_uploaded_agent(uploaded.name, uploaded.getvalue(), root=ROOT)
+                st.session_state["uploaded_agent_active"] = True
                 st.success(f"Loaded uploaded agent: {state['agent']['name']}")
             except UploadedAgentError as exc:
                 st.error(str(exc))
-                state = load_uploaded_agent_state(ROOT)
+                state = {"available": False}
         if action_cols[0].button(
             "Load Example Vulnerable Agent",
             key="load_example_uploaded_agent",
@@ -1172,11 +1180,20 @@ def _render_uploaded_agent_intake() -> None:
                         SAMPLE_UPLOADED_AGENT_MANIFEST.read_bytes(),
                         root=ROOT,
                     )
+                    st.session_state["uploaded_agent_active"] = True
                     st.success("Loaded the example vulnerable support agent.")
                 except UploadedAgentError as exc:
                     st.error(str(exc))
             else:
                 st.error("Example uploaded-agent manifest is missing.")
+        if action_cols[1].button(
+            "Clear Uploaded Agent",
+            key="clear_uploaded_agent",
+            use_container_width=True,
+        ):
+            state = clear_uploaded_agent_state(ROOT)
+            st.session_state["uploaded_agent_active"] = False
+            st.success("Uploaded-agent intake cleared.")
         _render_uploaded_agent_state(state)
 
 
