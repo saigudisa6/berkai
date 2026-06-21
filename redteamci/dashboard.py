@@ -141,8 +141,15 @@ def _require_streamlit() -> Any:
     return st
 
 
+def _render_html(html: str) -> None:
+    if hasattr(st, "html"):
+        st.html(html)
+    else:
+        st.markdown(html, unsafe_allow_html=True)
+
+
 def _inject_presenter_styles() -> None:
-    st.markdown(
+    _render_html(
         """
         <style>
         .stApp {
@@ -636,8 +643,7 @@ def _inject_presenter_styles() -> None:
           }
         }
         </style>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
@@ -671,7 +677,6 @@ def _render_presenter_mode() -> None:
     state = load_support_story_dashboard_state(ROOT)
     readiness = demo_readiness_status(state)
 
-    st.markdown('<div class="rt-cockpit-shell">', unsafe_allow_html=True)
     _render_cockpit_status_bar(state, readiness)
     _render_presenter_stepper(state, readiness)
     _render_cockpit_action_row()
@@ -695,9 +700,8 @@ def _render_presenter_mode() -> None:
 
     _render_presenter_green_proof_panel(state, readiness)
     _render_cockpit_artifact_drawer(state)
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown(
+    _render_html(
         """
         <div class="rt-section-band">
           <div class="rt-section-title">Optional any-agent intake lab</div>
@@ -706,8 +710,7 @@ def _render_presenter_mode() -> None:
             workflow on a different agent surface.
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
     uploaded_state = _render_uploaded_agent_intake()
     if uploaded_state.get("available"):
@@ -751,7 +754,7 @@ def _render_cockpit_status_bar(
             _readiness_tone(readiness),
         ),
     ]
-    st.markdown(
+    _render_html(
         f"""
         <div class="rt-topbar">
           <div class="rt-brand-card">
@@ -761,13 +764,12 @@ def _render_cockpit_status_bar(
           </div>
           {''.join(_top_status_html(label, value, tone) for label, value, tone in status_cards)}
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
 def _render_cockpit_action_row() -> None:
-    st.markdown(
+    _render_html(
         """
         <div class="rt-section-band">
           <div class="rt-section-title">Pipeline actions</div>
@@ -775,8 +777,7 @@ def _render_cockpit_action_row() -> None:
             Native Streamlit controls below execute the real RedTeamCI story commands.
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
     cols = st.columns(7)
     if cols[0].button("Prepare Story", key="cockpit_prepare", use_container_width=True):
@@ -830,9 +831,8 @@ def _render_cockpit_action_row() -> None:
             st.info("Green passes only when the refund is blocked before execution.")
     if cols[6].button("Refresh State", key="cockpit_refresh", use_container_width=True):
         st.rerun()
-    st.markdown(
-        '<div class="rt-action-note">Use Refresh State after commands to reload proof panels.</div>',
-        unsafe_allow_html=True,
+    _render_html(
+        '<div class="rt-action-note">Use Refresh State after commands to reload proof panels.</div>'
     )
 
 
@@ -861,11 +861,10 @@ def _render_cockpit_proof_cards(
         ("Refund blocked before execution", bool(proof.get("green_refund_blocked"))),
         ("Agent certified", bool(readiness.get("ready"))),
     ]
-    st.markdown(
+    _render_html(
         '<div class="rt-proof-strip">'
         + "".join(_cockpit_proof_card_html(label, ok) for label, ok in cards)
-        + "</div>",
-        unsafe_allow_html=True,
+        + "</div>"
     )
 
 
@@ -911,7 +910,7 @@ def _render_cockpit_artifact_drawer(state: dict[str, Any]) -> None:
             or story_root / "regressions" / "generated_attacks.json",
         ),
     ]
-    st.markdown(
+    _render_html(
         """
         <div class="rt-section-band">
           <div class="rt-section-title">Artifact drawer</div>
@@ -919,14 +918,12 @@ def _render_cockpit_artifact_drawer(state: dict[str, Any]) -> None:
             Replayable evidence created by the current red/Claude/green pipeline.
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
-    st.markdown(
+    _render_html(
         '<div class="rt-artifact-list">'
         + "".join(_artifact_chip_html(label, path) for label, path in artifacts)
-        + "</div>",
-        unsafe_allow_html=True,
+        + "</div>"
     )
     for label, path in artifacts:
         _render_file_artifact(label, path)
@@ -988,7 +985,7 @@ def _render_presenter_stepper(
         ("Green Proof", bool(green_summary and readiness.get("ready"))),
     ]
     first_pending = next((index for index, (_, done) in enumerate(steps) if not done), -1)
-    st.markdown(
+    _render_html(
         """
         <div class="rt-section-band">
           <div class="rt-section-title">Narrative pipeline</div>
@@ -998,14 +995,13 @@ def _render_presenter_stepper(
             _step_html(label, done, index == first_pending)
             for index, (label, done) in enumerate(steps)
         )
-        + "</div></div>",
-        unsafe_allow_html=True,
+        + "</div></div>"
     )
 
 
 def _render_agent_profile_panel() -> None:
     chips = "".join(f'<span class="rt-chip">{_html(capability)}</span>' for capability in PRESENTER_CAPABILITIES)
-    st.markdown(
+    _render_html(
         f"""
         <div class="rt-panel">
           <h3 class="rt-panel-title">Agent Profile</h3>
@@ -1017,8 +1013,7 @@ def _render_agent_profile_panel() -> None:
             {chips}
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
@@ -1041,15 +1036,14 @@ def _render_generated_attacks_panel(state: dict[str, Any]) -> None:
                 focus=bool(attack["focus"]),
             )
         )
-    st.markdown(
+    _render_html(
         f"""
         <div class="rt-panel">
           <h3 class="rt-panel-title">Generated Attacks</h3>
           <div class="rt-panel-subtitle">RedTeamCI generates tests from the agent's tool surface.</div>
           <div class="rt-card-grid">{''.join(cards)}</div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
     attack_pack = state.get("attack_pack", [])
     if attack_pack:
@@ -1063,7 +1057,7 @@ def _render_red_gate_panel(state: dict[str, Any]) -> None:
     local_gate = _summary_counts(red_summary)
     refund_status = _attack_status_label(red_summary, "generated-refund-001")
     refund_tone = _status_tone(refund_status)
-    st.markdown(
+    _render_html(
         f"""
         <div class="rt-panel">
           <h3 class="rt-panel-title">Red Gate</h3>
@@ -1079,8 +1073,7 @@ def _render_red_gate_panel(state: dict[str, Any]) -> None:
             <div class="rt-panel-subtitle">CI failed on structured tool behavior, not final text.</div>
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
@@ -1105,7 +1098,7 @@ def _render_trace_replay_panel(state: dict[str, Any]) -> None:
         _green_timeline_events(green_trace, regression_trace, proof),
         "good",
     )
-    st.markdown(
+    _render_html(
         f"""
         <div class="rt-panel">
           <h3 class="rt-panel-title">Trace Replay</h3>
@@ -1114,8 +1107,7 @@ def _render_trace_replay_panel(state: dict[str, Any]) -> None:
           </div>
           <div class="rt-trace-grid">{red_lane}{green_lane}</div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
     if red_trace:
         with st.expander("Show red trace JSON"):
@@ -1296,7 +1288,7 @@ def _render_sentry_incident_panel(state: dict[str, Any]) -> None:
     event_ids = context["event_ids"]
     event_text = ", ".join(event_ids) if event_ids else "No incident event recorded"
     api_status = "verified" if context["api_verified"] else "not verified"
-    st.markdown(
+    _render_html(
         f"""
         <div class="rt-panel">
           <h3 class="rt-panel-title">Sentry Incident</h3>
@@ -1320,8 +1312,7 @@ def _render_sentry_incident_panel(state: dict[str, Any]) -> None:
             </div>
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
     if context["open_url"]:
         st.link_button("Open in Sentry", context["open_url"])
@@ -1383,7 +1374,7 @@ def _render_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
         ("Guardrail diff", bool(diff_path and diff_path.exists())),
         ("Generated regression", bool(regression_path and regression_path.exists())),
     ]
-    st.markdown(
+    _render_html(
         f"""
         <div class="rt-panel">
           <h3 class="rt-panel-title">Claude Remediation</h3>
@@ -1415,8 +1406,7 @@ def _render_claude_remediation_panel(root: Path, state: dict[str, Any]) -> None:
             changed files: {_html(', '.join(changed_files) if changed_files else '-')}
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
     if prompt_path and prompt_path.exists():
@@ -1468,7 +1458,7 @@ def _render_presenter_green_proof_panel(
     refund_status = _attack_status_label(green_summary, "generated-refund-001")
     regression_status = _attack_status_label(green_summary, "regression-generated-refund-001")
     certified = readiness["status"] == "ready"
-    st.markdown(
+    _render_html(
         f"""
         <div class="rt-panel">
           <h3 class="rt-panel-title">Green Proof</h3>
@@ -1484,8 +1474,7 @@ def _render_presenter_green_proof_panel(
             {'AGENT CERTIFIED' if certified else 'AGENT NOT CERTIFIED'}
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
     with st.expander("Proof checklist"):
         for label, ok in readiness["checks"].items():
@@ -2804,10 +2793,7 @@ def _proof_tile_html(label: str, ok: bool) -> str:
 
 def _render_presenter_alert(tone: str, message: str) -> None:
     tone = tone if tone in {"good", "warn", "muted"} else "muted"
-    st.markdown(
-        f'<div class="rt-alert rt-alert-{_html(tone)}">{_html(message)}</div>',
-        unsafe_allow_html=True,
-    )
+    _render_html(f'<div class="rt-alert rt-alert-{_html(tone)}">{_html(message)}</div>')
 
 
 def _attack_card_html(
