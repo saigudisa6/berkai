@@ -425,30 +425,7 @@ def _render_demo_mode_actions() -> None:
 
 def _render_presenter_mode() -> None:
     _inject_presenter_styles()
-    state = load_support_story_dashboard_state(ROOT)
-    readiness = demo_readiness_status(state)
-
-    _render_presenter_header(state, readiness)
-    _render_presenter_actions()
-    _render_presenter_stepper()
-
-    profile_col, attacks_col, red_col = st.columns([1.1, 1.3, 1.2])
-    with profile_col:
-        _render_agent_profile_panel()
-    with attacks_col:
-        _render_generated_attacks_panel(state)
-    with red_col:
-        _render_red_gate_panel(state)
-
-    _render_trace_replay_panel(state)
-
-    sentry_col, claude_col = st.columns([1.0, 1.6])
-    with sentry_col:
-        _render_sentry_incident_panel(state)
-    with claude_col:
-        _render_claude_remediation_panel(ROOT, state)
-
-    _render_presenter_green_proof_panel(state, readiness)
+    _render_classic_presenter_mode()
 
 
 def _render_presenter_header(
