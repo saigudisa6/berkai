@@ -764,6 +764,44 @@ class RedTeamCITest(unittest.TestCase):
             self.assertEqual(generated_tests[0]["id"], "regression-pi-003-live")
             self.assertEqual(len(generated_tests[0]["assertions"]), 3)
 
+    def test_claude_remediator_accepts_custom_artifact_and_regression_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            guardrails = tmp_path / "guardrails.yml"
+            guardrails.write_text("allowed_tools:\n  - read_file\n", encoding="utf-8")
+            generated = tmp_path / "story" / "regressions" / "generated_attacks.json"
+            patches = tmp_path / "story" / "patches"
+            trace = {
+                "run_id": "run_test",
+                "attack_id": "pi-003",
+                "attack_name": "Browser Hidden Injection",
+                "outcome_reason": "failed",
+                "trace_path": str(tmp_path / "pi-003.json"),
+                "events": [{"type": "outcome", "status": "FAIL"}],
+            }
+            trace_path = tmp_path / "pi-003.json"
+            trace_path.write_text(json.dumps(trace), encoding="utf-8")
+
+            result = ClaudeCodeRemediator().remediate(
+                attack_id="pi-003",
+                trace_path=trace_path,
+                guardrails_path=guardrails,
+                apply=True,
+                use_fixture=True,
+                patches_root=patches,
+                regression_tests_path=generated,
+                summary_path_prefix="support_story",
+            )
+
+            self.assertTrue(result.success)
+            self.assertEqual(Path(result.summary_path), patches / "support_story_summary.json")
+            self.assertEqual(Path(result.diff_path), patches / "support_story.diff")
+            self.assertEqual(Path(result.regression_test_path), generated)
+            self.assertTrue(generated.exists())
+            summary = json.loads(Path(result.summary_path).read_text(encoding="utf-8"))
+            self.assertEqual(summary["diff_path"], str(patches / "support_story.diff"))
+            self.assertEqual(summary["regression_test_path"], str(generated))
+
     def test_claude_invalid_proposal_falls_back_and_records_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -983,6 +1021,7 @@ class RedTeamCITest(unittest.TestCase):
                 "SENTRY_ENVIRONMENT": "test-env",
                 "SENTRY_RELEASE": "abc123",
                 "REDTEAMCI_SCENARIO": "support-story",
+                "REDTEAMCI_CORRELATION_ID": "demo-123",
                 "GITHUB_ACTIONS": "true",
                 "GITHUB_RUN_URL": "https://github.com/owner/repo/actions/runs/99",
             },
@@ -1003,7 +1042,15 @@ class RedTeamCITest(unittest.TestCase):
                     summary_path=Path(".demo/support-story/red/summary.json"),
                     remediation_artifact_paths=[Path(".demo/support-story/patches/support_story.diff")],
                     regression_artifact_paths=[Path(".demo/support-story/regressions/generated_attacks.json")],
+                    dangerous_tool_attempt_details=[
+                        {
+                            "type": "tool_call_executed",
+                            "tool": "read_file",
+                            "args": {"path": ".env"},
+                        }
+                    ],
                     run_type="support_story_red",
+                    phase="red",
                 )
         self.assertEqual(event_id, "event-123")
         self.assertEqual(init_kwargs["dsn"], "https://example.invalid/1")
@@ -1018,6 +1065,8 @@ class RedTeamCITest(unittest.TestCase):
         self.assertEqual(captured["tags"]["dangerous_tool"], "read_file")
         self.assertEqual(captured["tags"]["blocked_before_execution"], "false")
         self.assertEqual(captured["tags"]["run_type"], "support_story_red")
+        self.assertEqual(captured["tags"]["phase"], "red")
+        self.assertEqual(captured["tags"]["correlation_id"], "demo-123")
         self.assertEqual(captured["tags"]["ci_provider"], "github_actions")
         self.assertEqual(
             captured["tags"]["github_run_url"],
@@ -1039,6 +1088,10 @@ class RedTeamCITest(unittest.TestCase):
         self.assertEqual(
             captured["extra"]["regression_artifact_paths"],
             [".demo/support-story/regressions/generated_attacks.json"],
+        )
+        self.assertEqual(
+            captured["extra"]["dangerous_tool_attempt_details"][0]["tool"],
+            "read_file",
         )
 
     def test_http_adapter_accepts_output_and_events(self) -> None:

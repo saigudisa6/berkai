@@ -37,6 +37,7 @@ jobs:
       SENTRY_ENVIRONMENT: github-actions-demo
       SENTRY_RELEASE: ${{ github.sha }}
       GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      REDTEAMCI_CORRELATION_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.correlation_id || github.run_id }}
       REDTEAMCI_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.scenario || 'ci' }}
 
     steps:

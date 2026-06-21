@@ -33,6 +33,7 @@ class RemediationResult:
     run_id: str
     changed_files: list[str]
     patch_diff: str
+    diff_path: str
     summary_path: str
     regression_test_path: str | None
     success: bool
@@ -75,21 +76,35 @@ class ClaudeCodeRemediator:
         max_turns: int = 12,
         timeout: int = 300,
         mode: str = CLAUDE_MODE_PROPOSAL,
+        patches_root: str | Path | None = None,
+        regression_tests_path: str | Path | None = None,
+        regression_tests_root: str | Path | None = None,
+        fixture_path: str | Path | None = None,
+        summary_path_prefix: str | None = None,
     ) -> RemediationResult:
         mode = normalize_claude_mode(mode)
         trace = json.loads(Path(trace_path).read_text(encoding="utf-8"))
         run_id = str(trace.get("run_id", "run_unknown"))
-        PATCHES_ROOT.mkdir(parents=True, exist_ok=True)
-        GENERATED_REGRESSIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        artifact_root = Path(patches_root) if patches_root else PATCHES_ROOT
+        regressions_path = Path(
+            regression_tests_path or regression_tests_root or GENERATED_REGRESSIONS_PATH
+        )
+        fixture_document_path = Path(fixture_path) if fixture_path else None
+        artifact_root.mkdir(parents=True, exist_ok=True)
+        regressions_path.parent.mkdir(parents=True, exist_ok=True)
 
         before_guardrails = _read_text(guardrails_path)
-        before_regressions = _read_text(GENERATED_REGRESSIONS_PATH)
+        before_regressions = _read_text(regressions_path)
 
         if use_fixture:
             return self._fixture_result(
                 attack_id=attack_id,
                 run_id=run_id,
                 guardrails_path=guardrails_path,
+                patches_root=artifact_root,
+                regression_tests_path=regressions_path,
+                fixture_path=fixture_document_path,
+                summary_path_prefix=summary_path_prefix,
                 before_guardrails=before_guardrails,
                 before_regressions=before_regressions,
                 apply=apply,
@@ -105,6 +120,9 @@ class ClaudeCodeRemediator:
                     trace=trace,
                     trace_path=Path(trace_path),
                     guardrails_path=guardrails_path,
+                    patches_root=artifact_root,
+                    regression_tests_path=regressions_path,
+                    summary_path_prefix=summary_path_prefix,
                     before_guardrails=before_guardrails,
                     before_regressions=before_regressions,
                     apply=apply,
@@ -118,6 +136,9 @@ class ClaudeCodeRemediator:
                     trace=trace,
                     trace_path=Path(trace_path),
                     guardrails_path=guardrails_path,
+                    patches_root=artifact_root,
+                    regression_tests_path=regressions_path,
+                    summary_path_prefix=summary_path_prefix,
                     before_guardrails=before_guardrails,
                     before_regressions=before_regressions,
                     apply=apply,
@@ -133,6 +154,8 @@ class ClaudeCodeRemediator:
                 trace=trace,
                 trace_path=Path(trace_path),
                 guardrails_path=guardrails_path,
+                patches_root=artifact_root,
+                summary_path_prefix=summary_path_prefix,
                 before_guardrails=before_guardrails,
                 apply=apply,
             )
@@ -145,6 +168,10 @@ class ClaudeCodeRemediator:
                     attack_id=attack_id,
                     run_id=run_id,
                     guardrails_path=guardrails_path,
+                    patches_root=artifact_root,
+                    regression_tests_path=regressions_path,
+                    fixture_path=fixture_document_path,
+                    summary_path_prefix=summary_path_prefix,
                     before_guardrails=before_guardrails,
                     before_regressions=before_regressions,
                     apply=apply,
@@ -169,12 +196,20 @@ class ClaudeCodeRemediator:
         trace: dict[str, Any],
         trace_path: Path,
         guardrails_path: Path,
+        patches_root: Path,
+        summary_path_prefix: str | None,
         before_guardrails: str,
         apply: bool,
     ) -> RemediationResult:
         run_id = str(trace.get("run_id", "run_unknown"))
         if mode == CLAUDE_MODE_DIRECT_EDIT:
-            summary_path = PATCHES_ROOT / f"{run_id}_{attack_id}_claude_direct_edit_summary.json"
+            summary_path = _artifact_path(
+                patches_root,
+                run_id,
+                attack_id,
+                "claude_direct_edit_summary.json",
+                summary_path_prefix,
+            )
             prompt = build_claude_prompt(
                 attack_id=attack_id,
                 trace=trace,
@@ -196,6 +231,8 @@ class ClaudeCodeRemediator:
             run_id=run_id,
             prompt=prompt,
             mode=mode,
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
         error = "Claude Code CLI is not available."
         validation_error_path = write_claude_validation_error_artifact(
@@ -203,6 +240,8 @@ class ClaudeCodeRemediator:
             run_id=run_id,
             errors=[error],
             mode=mode,
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
         return self._write_result(
             source=_source_for_mode(mode),
@@ -224,6 +263,8 @@ class ClaudeCodeRemediator:
             },
             prompt_path=str(prompt_path),
             validation_error_path=str(validation_error_path),
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
 
     def _fixture_result(
@@ -232,6 +273,10 @@ class ClaudeCodeRemediator:
         attack_id: str,
         run_id: str,
         guardrails_path: Path,
+        patches_root: Path,
+        regression_tests_path: Path,
+        fixture_path: Path | None,
+        summary_path_prefix: str | None,
         before_guardrails: str,
         before_regressions: str,
         apply: bool,
@@ -241,16 +286,20 @@ class ClaudeCodeRemediator:
         proposal_path: str | None = None,
         validation_error_path: str | None = None,
     ) -> RemediationResult:
-        patch_document = load_fixture_patch(attack_id)
+        patch_document = (
+            json.loads(fixture_path.read_text(encoding="utf-8"))
+            if fixture_path
+            else load_fixture_patch(attack_id)
+        )
         if apply:
             apply_patch_document(
                 patch_document,
                 guardrails_path=guardrails_path,
-                regression_tests_root=GENERATED_REGRESSIONS_PATH,
+                regression_tests_root=regression_tests_path,
             )
         after_guardrails = _read_text(guardrails_path) if apply else before_guardrails
         after_regressions = (
-            _read_text(GENERATED_REGRESSIONS_PATH) if apply else before_regressions
+            _read_text(regression_tests_path) if apply else before_regressions
         )
         if not apply:
             merged = merge_guardrail_patch(
@@ -268,15 +317,23 @@ class ClaudeCodeRemediator:
             after_guardrails,
             before_regressions,
             after_regressions,
+            guardrails_label=_display_path(guardrails_path),
+            regressions_label=_display_path(regression_tests_path),
         )
         changed_files = _changed_files(
             before_guardrails,
             after_guardrails,
             before_regressions,
             after_regressions,
+            guardrails_label=_display_path(guardrails_path),
+            regressions_label=_display_path(regression_tests_path),
         )
         if not changed_files:
-            changed_files = _changed_files_from_patch_document(patch_document)
+            changed_files = _changed_files_from_patch_document(
+                patch_document,
+                guardrails_label=_display_path(guardrails_path),
+                regressions_label=_display_path(regression_tests_path),
+            )
         return self._write_result(
             source="fixture",
             attack_id=attack_id,
@@ -284,7 +341,7 @@ class ClaudeCodeRemediator:
             changed_files=changed_files,
             patch_diff=diff,
             regression_test_path=(
-                str(GENERATED_REGRESSIONS_PATH) if patch_document.get("regression_test") else None
+                str(regression_tests_path) if patch_document.get("regression_test") else None
             ),
             success=True,
             error=None,
@@ -298,6 +355,8 @@ class ClaudeCodeRemediator:
             raw_output_path=raw_output_path,
             proposal_path=proposal_path,
             validation_error_path=validation_error_path,
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
 
     def _claude_code_proposal_result(
@@ -308,6 +367,9 @@ class ClaudeCodeRemediator:
         trace: dict[str, Any],
         trace_path: Path,
         guardrails_path: Path,
+        patches_root: Path,
+        regression_tests_path: Path,
+        summary_path_prefix: str | None,
         before_guardrails: str,
         before_regressions: str,
         apply: bool,
@@ -327,6 +389,8 @@ class ClaudeCodeRemediator:
             run_id=run_id,
             prompt=prompt,
             mode=CLAUDE_MODE_PROPOSAL,
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
         command = [
             executable,
@@ -364,6 +428,8 @@ class ClaudeCodeRemediator:
                 stderr=raw_stderr,
                 returncode=None,
                 mode=CLAUDE_MODE_PROPOSAL,
+                patches_root=patches_root,
+                artifact_prefix=summary_path_prefix,
             )
             if isinstance(exc, subprocess.TimeoutExpired):
                 error = (
@@ -377,6 +443,8 @@ class ClaudeCodeRemediator:
                 run_id=run_id,
                 errors=[error],
                 mode=CLAUDE_MODE_PROPOSAL,
+                patches_root=patches_root,
+                artifact_prefix=summary_path_prefix,
             )
             return self._write_result(
                 source="claude_code_proposal",
@@ -398,6 +466,8 @@ class ClaudeCodeRemediator:
                 prompt_path=str(prompt_path),
                 raw_output_path=str(raw_output_path),
                 validation_error_path=str(validation_error_path),
+                patches_root=patches_root,
+                artifact_prefix=summary_path_prefix,
             )
 
         raw_output_path = write_claude_raw_output_artifact(
@@ -407,6 +477,8 @@ class ClaudeCodeRemediator:
             stderr=completed.stderr,
             returncode=completed.returncode,
             mode=CLAUDE_MODE_PROPOSAL,
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
         if completed.returncode != 0:
             validation_errors.append(
@@ -428,6 +500,8 @@ class ClaudeCodeRemediator:
                 attack_id=attack_id,
                 run_id=run_id,
                 proposal=patch_document,
+                patches_root=patches_root,
+                artifact_prefix=summary_path_prefix,
             )
 
         if validation_errors or patch_document is None:
@@ -436,6 +510,8 @@ class ClaudeCodeRemediator:
                 run_id=run_id,
                 errors=validation_errors or ["Claude Code did not return a patch document."],
                 mode=CLAUDE_MODE_PROPOSAL,
+                patches_root=patches_root,
+                artifact_prefix=summary_path_prefix,
             )
             error = "Claude Code generated an invalid remediation proposal: " + "; ".join(
                 validation_errors or ["missing patch document"]
@@ -461,16 +537,18 @@ class ClaudeCodeRemediator:
                 raw_output_path=str(raw_output_path),
                 proposal_path=str(proposal_path) if proposal_path else None,
                 validation_error_path=str(validation_error_path),
+                patches_root=patches_root,
+                artifact_prefix=summary_path_prefix,
             )
 
         if apply:
             apply_patch_document(
                 patch_document,
                 guardrails_path=guardrails_path,
-                regression_tests_root=GENERATED_REGRESSIONS_PATH,
+                regression_tests_root=regression_tests_path,
             )
             after_guardrails = _read_text(guardrails_path)
-            after_regressions = _read_text(GENERATED_REGRESSIONS_PATH)
+            after_regressions = _read_text(regression_tests_path)
         else:
             merged = merge_guardrail_patch(
                 load_guardrails(guardrails_path),
@@ -487,12 +565,16 @@ class ClaudeCodeRemediator:
             after_guardrails,
             before_regressions,
             after_regressions,
+            guardrails_label=_display_path(guardrails_path),
+            regressions_label=_display_path(regression_tests_path),
         )
         changed_files = _changed_files(
             before_guardrails,
             after_guardrails,
             before_regressions,
             after_regressions,
+            guardrails_label=_display_path(guardrails_path),
+            regressions_label=_display_path(regression_tests_path),
         )
         success = bool(changed_files)
         error = None
@@ -508,7 +590,7 @@ class ClaudeCodeRemediator:
             changed_files=changed_files,
             patch_diff=diff,
             regression_test_path=(
-                str(GENERATED_REGRESSIONS_PATH)
+                str(regression_tests_path)
                 if patch_document.get("regression_test")
                 else None
             ),
@@ -526,6 +608,8 @@ class ClaudeCodeRemediator:
             prompt_path=str(prompt_path),
             raw_output_path=str(raw_output_path),
             proposal_path=str(proposal_path) if proposal_path else None,
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
 
     def _claude_code_direct_edit_result(
@@ -536,6 +620,9 @@ class ClaudeCodeRemediator:
         trace: dict[str, Any],
         trace_path: Path,
         guardrails_path: Path,
+        patches_root: Path,
+        regression_tests_path: Path,
+        summary_path_prefix: str | None,
         before_guardrails: str,
         before_regressions: str,
         apply: bool,
@@ -543,7 +630,13 @@ class ClaudeCodeRemediator:
         timeout: int,
     ) -> RemediationResult:
         run_id = str(trace.get("run_id", "run_unknown"))
-        summary_path = PATCHES_ROOT / f"{run_id}_{attack_id}_claude_direct_edit_summary.json"
+        summary_path = _artifact_path(
+            patches_root,
+            run_id,
+            attack_id,
+            "claude_direct_edit_summary.json",
+            summary_path_prefix,
+        )
         prompt = build_claude_prompt(
             attack_id=attack_id,
             trace=trace,
@@ -557,6 +650,8 @@ class ClaudeCodeRemediator:
             run_id=run_id,
             prompt=prompt,
             mode=CLAUDE_MODE_DIRECT_EDIT,
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
         if not apply:
             return self._write_result(
@@ -576,6 +671,8 @@ class ClaudeCodeRemediator:
                     "applied": apply,
                 },
                 prompt_path=str(prompt_path),
+                patches_root=patches_root,
+                artifact_prefix=summary_path_prefix,
             )
         try:
             completed = subprocess.run(
@@ -609,6 +706,8 @@ class ClaudeCodeRemediator:
                 stderr=_process_output(getattr(exc, "stderr", "")) or _exception_summary(exc),
                 returncode=None,
                 mode=CLAUDE_MODE_DIRECT_EDIT,
+                patches_root=patches_root,
+                artifact_prefix=summary_path_prefix,
             )
             if isinstance(exc, subprocess.TimeoutExpired):
                 error = (
@@ -636,6 +735,8 @@ class ClaudeCodeRemediator:
                 },
                 prompt_path=str(prompt_path),
                 raw_output_path=str(raw_output_path),
+                patches_root=patches_root,
+                artifact_prefix=summary_path_prefix,
             )
 
         raw_output_path = write_claude_raw_output_artifact(
@@ -645,20 +746,26 @@ class ClaudeCodeRemediator:
             stderr=completed.stderr,
             returncode=completed.returncode,
             mode=CLAUDE_MODE_DIRECT_EDIT,
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
         after_guardrails = _read_text(guardrails_path)
-        after_regressions = _read_text(GENERATED_REGRESSIONS_PATH)
+        after_regressions = _read_text(regression_tests_path)
         diff = _combined_diff(
             before_guardrails,
             after_guardrails,
             before_regressions,
             after_regressions,
+            guardrails_label=_display_path(guardrails_path),
+            regressions_label=_display_path(regression_tests_path),
         )
         changed_files = _changed_files(
             before_guardrails,
             after_guardrails,
             before_regressions,
             after_regressions,
+            guardrails_label=_display_path(guardrails_path),
+            regressions_label=_display_path(regression_tests_path),
         )
         payload = _read_json(summary_path) or {
             "failure_analysis": "Claude Code direct-edit remediation completed.",
@@ -672,7 +779,7 @@ class ClaudeCodeRemediator:
             changed_files=changed_files,
             patch_diff=diff,
             regression_test_path=(
-                str(GENERATED_REGRESSIONS_PATH) if GENERATED_REGRESSIONS_PATH.exists() else None
+                str(regression_tests_path) if regression_tests_path.exists() else None
             ),
             success=success,
             error=None
@@ -692,6 +799,8 @@ class ClaudeCodeRemediator:
             },
             prompt_path=str(prompt_path),
             raw_output_path=str(raw_output_path),
+            patches_root=patches_root,
+            artifact_prefix=summary_path_prefix,
         )
 
     def _write_result(
@@ -710,9 +819,23 @@ class ClaudeCodeRemediator:
         raw_output_path: str | None = None,
         proposal_path: str | None = None,
         validation_error_path: str | None = None,
+        patches_root: Path = PATCHES_ROOT,
+        artifact_prefix: str | None = None,
     ) -> RemediationResult:
-        diff_path = PATCHES_ROOT / f"{run_id}_{attack_id}.diff"
-        summary_path = PATCHES_ROOT / f"{run_id}_{attack_id}_summary.json"
+        diff_path = _artifact_path(
+            patches_root,
+            run_id,
+            attack_id,
+            "diff",
+            artifact_prefix,
+        )
+        summary_path = _artifact_path(
+            patches_root,
+            run_id,
+            attack_id,
+            "summary.json",
+            artifact_prefix,
+        )
         diff_path.write_text(patch_diff, encoding="utf-8")
         summary = {
             "source": source,
@@ -745,6 +868,7 @@ class ClaudeCodeRemediator:
             run_id=run_id,
             changed_files=changed_files,
             patch_diff=patch_diff,
+            diff_path=str(diff_path),
             summary_path=str(summary_path),
             regression_test_path=regression_test_path,
             success=success,
@@ -971,9 +1095,17 @@ def write_claude_prompt_artifact(
     run_id: str,
     prompt: str,
     mode: str = CLAUDE_MODE_PROPOSAL,
+    patches_root: Path = PATCHES_ROOT,
+    artifact_prefix: str | None = None,
 ) -> Path:
-    PATCHES_ROOT.mkdir(parents=True, exist_ok=True)
-    path = PATCHES_ROOT / f"{run_id}_{attack_id}_claude_{_mode_slug(mode)}_prompt.txt"
+    patches_root.mkdir(parents=True, exist_ok=True)
+    path = _artifact_path(
+        patches_root,
+        run_id,
+        attack_id,
+        f"claude_{_mode_slug(mode)}_prompt.txt",
+        artifact_prefix,
+    )
     path.write_text(prompt, encoding="utf-8")
     return path
 
@@ -986,9 +1118,17 @@ def write_claude_raw_output_artifact(
     stderr: str,
     returncode: int | None,
     mode: str = CLAUDE_MODE_PROPOSAL,
+    patches_root: Path = PATCHES_ROOT,
+    artifact_prefix: str | None = None,
 ) -> Path:
-    PATCHES_ROOT.mkdir(parents=True, exist_ok=True)
-    path = PATCHES_ROOT / f"{run_id}_{attack_id}_claude_{_mode_slug(mode)}_raw.json"
+    patches_root.mkdir(parents=True, exist_ok=True)
+    path = _artifact_path(
+        patches_root,
+        run_id,
+        attack_id,
+        f"claude_{_mode_slug(mode)}_raw.json",
+        artifact_prefix,
+    )
     path.write_text(
         json.dumps(
             {
@@ -1008,9 +1148,17 @@ def write_claude_proposal_artifact(
     attack_id: str,
     run_id: str,
     proposal: dict[str, Any],
+    patches_root: Path = PATCHES_ROOT,
+    artifact_prefix: str | None = None,
 ) -> Path:
-    PATCHES_ROOT.mkdir(parents=True, exist_ok=True)
-    path = PATCHES_ROOT / f"{run_id}_{attack_id}_claude_proposal.json"
+    patches_root.mkdir(parents=True, exist_ok=True)
+    path = _artifact_path(
+        patches_root,
+        run_id,
+        attack_id,
+        "claude_proposal.json",
+        artifact_prefix,
+    )
     path.write_text(json.dumps(proposal, indent=2), encoding="utf-8")
     return path
 
@@ -1021,9 +1169,17 @@ def write_claude_validation_error_artifact(
     run_id: str,
     errors: list[str],
     mode: str,
+    patches_root: Path = PATCHES_ROOT,
+    artifact_prefix: str | None = None,
 ) -> Path:
-    PATCHES_ROOT.mkdir(parents=True, exist_ok=True)
-    path = PATCHES_ROOT / f"{run_id}_{attack_id}_claude_{_mode_slug(mode)}_validation_errors.json"
+    patches_root.mkdir(parents=True, exist_ok=True)
+    path = _artifact_path(
+        patches_root,
+        run_id,
+        attack_id,
+        f"claude_{_mode_slug(mode)}_validation_errors.json",
+        artifact_prefix,
+    )
     path.write_text(json.dumps({"errors": errors}, indent=2), encoding="utf-8")
     return path
 
@@ -1112,6 +1268,9 @@ def _combined_diff(
     after_guardrails: str,
     before_regressions: str,
     after_regressions: str,
+    *,
+    guardrails_label: str = "guardrails.yml",
+    regressions_label: str = "regressions/generated_attacks.json",
 ) -> str:
     parts = []
     if before_guardrails != after_guardrails:
@@ -1119,8 +1278,8 @@ def _combined_diff(
             make_diff(
                 before_guardrails,
                 after_guardrails,
-                fromfile="guardrails.yml.before",
-                tofile="guardrails.yml",
+                fromfile=f"{guardrails_label}.before",
+                tofile=guardrails_label,
             )
         )
     if before_regressions != after_regressions:
@@ -1128,8 +1287,8 @@ def _combined_diff(
             make_diff(
                 before_regressions,
                 after_regressions,
-                fromfile="regressions/generated_attacks.json.before",
-                tofile="regressions/generated_attacks.json",
+                fromfile=f"{regressions_label}.before",
+                tofile=regressions_label,
             )
         )
     return "\n".join(part for part in parts if part)
@@ -1140,21 +1299,29 @@ def _changed_files(
     after_guardrails: str,
     before_regressions: str,
     after_regressions: str,
+    *,
+    guardrails_label: str = "guardrails.yml",
+    regressions_label: str = "regressions/generated_attacks.json",
 ) -> list[str]:
     changed_files: list[str] = []
     if before_guardrails != after_guardrails:
-        changed_files.append("guardrails.yml")
+        changed_files.append(guardrails_label)
     if before_regressions != after_regressions:
-        changed_files.append("regressions/generated_attacks.json")
+        changed_files.append(regressions_label)
     return changed_files
 
 
-def _changed_files_from_patch_document(patch_document: dict[str, Any]) -> list[str]:
+def _changed_files_from_patch_document(
+    patch_document: dict[str, Any],
+    *,
+    guardrails_label: str = "guardrails.yml",
+    regressions_label: str = "regressions/generated_attacks.json",
+) -> list[str]:
     changed_files = []
     if patch_document.get("guardrail_patch"):
-        changed_files.append("guardrails.yml")
+        changed_files.append(guardrails_label)
     if patch_document.get("regression_test"):
-        changed_files.append("regressions/generated_attacks.json")
+        changed_files.append(regressions_label)
     return changed_files
 
 
@@ -1179,6 +1346,36 @@ def _is_list_of_strings(value: Any) -> bool:
 
 def _mode_slug(mode: str) -> str:
     return normalize_claude_mode(mode).replace("-", "_")
+
+
+def _artifact_path(
+    patches_root: Path,
+    run_id: str,
+    attack_id: str,
+    suffix: str,
+    artifact_prefix: str | None,
+) -> Path:
+    patches_root.mkdir(parents=True, exist_ok=True)
+    stem = _artifact_stem(run_id, attack_id, artifact_prefix)
+    if suffix.startswith("."):
+        return patches_root / f"{stem}{suffix}"
+    if suffix == "diff":
+        return patches_root / f"{stem}.diff"
+    return patches_root / f"{stem}_{suffix}"
+
+
+def _artifact_stem(run_id: str, attack_id: str, artifact_prefix: str | None) -> str:
+    prefix = (artifact_prefix or "").strip().strip("_")
+    if prefix:
+        return prefix
+    return f"{run_id}_{attack_id}"
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def _source_for_mode(mode: str) -> str:

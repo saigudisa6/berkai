@@ -8,8 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from .adapters import AgentConfig
+from .claude_code import ClaudeCodeRemediator
 from .generator import write_plan_outputs
 from .github_annotations import render_github_annotations
+from .integrations import (
+    build_verification_event_context,
+    capture_verification_if_configured,
+)
 from .patcher import apply_patch_document, load_trace_for_attack
 from .paths import FIXTURES_ROOT, ROOT
 from .runner import RunReport, run_suite
@@ -49,6 +54,7 @@ class StoryStepResult:
     summary_path: Path | None = None
     annotations: list[str] | None = None
     proof: dict[str, Any] | None = None
+    details: dict[str, Any] | None = None
 
     @property
     def failed(self) -> bool:
@@ -141,6 +147,12 @@ def apply_support_story_remediation() -> StoryStepResult:
         "guardrails_path": _rel(SUPPORT_STORY_GUARDRAILS),
         "regression_test_path": _rel(SUPPORT_STORY_REGRESSIONS),
         "diff_path": _rel(diff_path),
+        "prompt_path": None,
+        "raw_output_path": None,
+        "proposal_path": None,
+        "validation_error_path": None,
+        "fixture_fallback_used": True,
+        "live_claude_proposal_applied": False,
         "changed_files": [
             _rel(SUPPORT_STORY_GUARDRAILS),
             _rel(SUPPORT_STORY_REGRESSIONS),
@@ -152,14 +164,57 @@ def apply_support_story_remediation() -> StoryStepResult:
     _merge_state(
         {
             "remediated": True,
-            "remediation": {
-                "summary": _rel(summary_path),
-                "diff": _rel(diff_path),
-                "regression": _rel(SUPPORT_STORY_REGRESSIONS),
-            },
+            "remediation": _remediation_state_from_summary(summary_path),
         }
     )
-    return StoryStepResult(step="remediate", ok=True, summary_path=summary_path)
+    return StoryStepResult(
+        step="remediate",
+        ok=True,
+        summary_path=summary_path,
+        details=_remediation_state_from_summary(summary_path),
+    )
+
+
+def run_support_story_claude_code_remediation(
+    *,
+    strict_claude_code: bool = False,
+    fixture_fallback: bool = True,
+    mode: str = "proposal",
+) -> StoryStepResult:
+    _ensure_red_trace()
+    trace = load_support_story_trace("red", "generated-refund-001")
+    trace_path = Path(str(trace.get("trace_path", "")))
+    if not trace_path.exists():
+        trace_path = _latest_trace_path("red", "generated-refund-001")
+
+    result = ClaudeCodeRemediator().remediate(
+        attack_id="generated-refund-001",
+        trace_path=trace_path,
+        guardrails_path=SUPPORT_STORY_GUARDRAILS,
+        apply=True,
+        use_fixture=False,
+        allow_fixture_fallback=bool(fixture_fallback and not strict_claude_code),
+        mode=mode,
+        patches_root=SUPPORT_STORY_PATCHES_DIR,
+        regression_tests_path=SUPPORT_STORY_REGRESSIONS,
+        fixture_path=SUPPORT_STORY_FIXTURE,
+        summary_path_prefix="support_story",
+    )
+    summary_path = Path(result.summary_path)
+    remediation = _remediation_state_from_summary(summary_path)
+    remediation["strict_claude_code"] = strict_claude_code
+    _merge_state(
+        {
+            "remediated": result.success,
+            "remediation": remediation,
+        }
+    )
+    return StoryStepResult(
+        step="claude-code-remediate",
+        ok=result.success,
+        summary_path=summary_path,
+        details=remediation,
+    )
 
 
 def run_support_story_green_local() -> StoryStepResult:
@@ -169,6 +224,12 @@ def run_support_story_green_local() -> StoryStepResult:
         selected_attack_ids=SUPPORT_STORY_GREEN_ATTACK_IDS,
     )
     proof = build_support_story_proof()
+    verification = _capture_support_story_verification(report.run_id, proof)
+    if verification:
+        integrations = report.summary.setdefault("integrations", {})
+        integrations["sentry_verification_event_ids"] = [verification["event_id"]]
+        integrations["sentry_verification_events"] = [verification]
+        write_summary(report.summary, SUPPORT_STORY_GREEN_DIR / "summary.json")
     _merge_state(
         {
             "green": _run_state(
@@ -194,7 +255,7 @@ def run_full_support_story_local() -> dict[str, Any]:
     prepare_support_story_workspace()
     generate_support_story_plan()
     red = run_support_story_red_local()
-    remediate = apply_support_story_remediation()
+    remediate = run_support_story_claude_code_remediation(fixture_fallback=True)
     green = run_support_story_green_local()
     return {
         "red": _result_dict(red),
@@ -304,6 +365,7 @@ def _run_support_story_gate(
         selected_attack_ids=selected_attack_ids,
         agent_config=AgentConfig(
             kind="cli",
+            name="customer-support-agent-level2",
             command=[sys.executable, "examples/support_agent_level2.py"],
             timeout=10,
         ),
@@ -317,6 +379,7 @@ def _run_support_story_gate(
         ),
         regression_artifact_paths=_existing_paths([SUPPORT_STORY_REGRESSIONS]),
         scenario="support-story",
+        phase=phase,
     )
     write_summary(report.summary, phase_dir / "summary.json")
     write_junit_summary(report.summary, phase_dir / "results.junit.xml")
@@ -362,12 +425,92 @@ def _clear_stale_green_artifacts() -> None:
     SUPPORT_STORY_PATCHES_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _ensure_red_trace() -> None:
+    _ensure_plan()
+    try:
+        load_support_story_trace("red", "generated-refund-001")
+    except (FileNotFoundError, json.JSONDecodeError):
+        run_support_story_red_local()
+
+
+def _latest_trace_path(phase: str, attack_id: str) -> Path:
+    traces_root = _phase_dir(phase) / "traces"
+    matches = sorted(traces_root.glob(f"run_*/{attack_id}.json"))
+    if not matches:
+        raise FileNotFoundError(f"No {phase} trace for {attack_id} under {traces_root}")
+    return matches[-1]
+
+
+def _remediation_state_from_summary(summary_path: Path) -> dict[str, Any]:
+    summary = _load_json_object(summary_path)
+    state = {
+        "source": str(summary.get("source", "")),
+        "live_claude_proposal_applied": bool(
+            summary.get("live_claude_proposal_applied")
+        ),
+        "fixture_fallback_used": bool(summary.get("fixture_fallback_used")),
+        "prompt_path": _optional_rel(summary.get("prompt_path")),
+        "raw_output_path": _optional_rel(summary.get("raw_output_path")),
+        "proposal_path": _optional_rel(summary.get("proposal_path")),
+        "validation_error_path": _optional_rel(summary.get("validation_error_path")),
+        "summary_path": _rel(summary_path),
+        "diff_path": _optional_rel(summary.get("diff_path")),
+        "changed_files": _string_list(summary.get("changed_files")),
+        "regression_test_path": _optional_rel(summary.get("regression_test_path")),
+        "success": bool(summary.get("success")),
+        "error": summary.get("error"),
+        "validation_errors": summary.get("validation_errors", []),
+    }
+    state["summary"] = state["summary_path"]
+    state["diff"] = state["diff_path"]
+    state["regression"] = state["regression_test_path"]
+    return state
+
+
+def _capture_support_story_verification(
+    run_id: str,
+    proof: dict[str, Any],
+) -> dict[str, Any]:
+    if not proof.get("certified"):
+        return {}
+    payload = {
+        "run_id": run_id,
+        "proof": proof,
+        "summary_path": SUPPORT_STORY_GREEN_DIR / "summary.json",
+        "remediation_artifact_paths": _existing_paths(_support_story_patch_artifacts()),
+        "regression_artifact_paths": _existing_paths([SUPPORT_STORY_REGRESSIONS]),
+        "trace_paths": _existing_paths(
+            [
+                _latest_trace_path("red", "generated-refund-001"),
+                _latest_trace_path("green", "generated-refund-001"),
+                _latest_trace_path("green", "regression-generated-refund-001"),
+            ]
+        ),
+    }
+    event_id = capture_verification_if_configured(**payload)
+    if not event_id:
+        return {}
+    return build_verification_event_context(event_id=event_id, **payload)
+
+
+def _support_story_patch_artifacts() -> list[Path]:
+    return [
+        SUPPORT_STORY_PATCHES_DIR / "support_story_summary.json",
+        SUPPORT_STORY_PATCHES_DIR / "support_story.diff",
+        SUPPORT_STORY_PATCHES_DIR / "support_story_claude_proposal_prompt.txt",
+        SUPPORT_STORY_PATCHES_DIR / "support_story_claude_proposal_raw.json",
+        SUPPORT_STORY_PATCHES_DIR / "support_story_claude_proposal.json",
+        SUPPORT_STORY_PATCHES_DIR / "support_story_claude_proposal_validation_errors.json",
+    ]
+
+
 def _result_dict(result: StoryStepResult) -> dict[str, Any]:
     return {
         "step": result.step,
         "ok": result.ok,
         "summary_path": _rel(result.summary_path) if result.summary_path else None,
         "proof": result.proof,
+        "details": result.details,
     }
 
 
@@ -391,6 +534,18 @@ def _run_state(
         state["sentry_event_ids"] = sentry_ids
     if sentry_events:
         state["sentry_events"] = sentry_events
+    verification_ids = _sentry_integration_ids(
+        run_summary,
+        "sentry_verification_event_ids",
+    )
+    verification_events = _sentry_integration_events(
+        run_summary,
+        "sentry_verification_events",
+    )
+    if verification_ids:
+        state["sentry_verification_event_ids"] = verification_ids
+    if verification_events:
+        state["sentry_verification_events"] = verification_events
     return state
 
 
@@ -400,6 +555,21 @@ def _rel(path: Path | str) -> str:
         return path.resolve().relative_to(ROOT.resolve()).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _optional_rel(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if not text:
+        return None
+    return _rel(Path(text))
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item)]
 
 
 def _load_trace_or_empty(phase: str, attack_id: str) -> dict[str, Any]:
@@ -451,24 +621,38 @@ def _existing_paths(paths: list[Path]) -> list[Path]:
 
 
 def _sentry_event_ids(summary: dict[str, Any] | None) -> list[str]:
+    return _sentry_integration_ids(summary, "sentry_event_ids")
+
+
+def _sentry_events(summary: dict[str, Any] | None) -> list[dict[str, Any]]:
+    return _sentry_integration_events(summary, "sentry_events")
+
+
+def _sentry_integration_ids(
+    summary: dict[str, Any] | None,
+    key: str,
+) -> list[str]:
     if not summary:
         return []
     integrations = summary.get("integrations", {})
     if not isinstance(integrations, dict):
         return []
-    event_ids = integrations.get("sentry_event_ids", [])
+    event_ids = integrations.get(key, [])
     if not isinstance(event_ids, list):
         return []
     return [str(event_id) for event_id in event_ids if event_id]
 
 
-def _sentry_events(summary: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _sentry_integration_events(
+    summary: dict[str, Any] | None,
+    key: str,
+) -> list[dict[str, Any]]:
     if not summary:
         return []
     integrations = summary.get("integrations", {})
     if not isinstance(integrations, dict):
         return []
-    events = integrations.get("sentry_events", [])
+    events = integrations.get(key, [])
     if not isinstance(events, list):
         return []
     return [event for event in events if isinstance(event, dict)]

@@ -238,11 +238,24 @@ def build_parser() -> argparse.ArgumentParser:
     story.add_argument("story_name", choices=["support"])
     story.add_argument(
         "--step",
-        choices=["prepare", "plan", "red", "trace", "remediate", "green", "state", "full"],
+        choices=[
+            "prepare",
+            "plan",
+            "red",
+            "trace",
+            "remediate",
+            "claude-code-remediate",
+            "green",
+            "state",
+            "full",
+        ],
         required=True,
     )
     story.add_argument("--phase", choices=["red", "green"], default="red")
     story.add_argument("--attack", default="generated-refund-001")
+    story.add_argument("--strict-claude-code", action="store_true")
+    story.add_argument("--fixture-fallback", action="store_true")
+    story.add_argument("--mode", choices=["proposal", "direct-edit"], default="proposal")
     story.add_argument("--json", action="store_true")
     story.add_argument("--github-annotations", action="store_true")
     story.add_argument(
@@ -368,6 +381,7 @@ def fix_command(args: argparse.Namespace) -> int:
                     "success": result.success,
                     "changed_files": result.changed_files,
                     "summary_path": result.summary_path,
+                    "diff_path": result.diff_path,
                     "regression_test_path": result.regression_test_path,
                     "diff": result.patch_diff,
                     "error": result.error,
@@ -477,6 +491,7 @@ def claude_command(args: argparse.Namespace) -> int:
                         "success": result.success,
                         "changed_files": result.changed_files,
                         "summary_path": result.summary_path,
+                        "diff_path": result.diff_path,
                         "prompt_path": result.prompt_path,
                         "raw_output_path": result.raw_output_path,
                         "proposal_path": result.proposal_path,
@@ -519,7 +534,10 @@ def reset_command(args: argparse.Namespace) -> int:
 
 def dashboard_command(args: argparse.Namespace) -> int:
     command = [sys.executable, "-m", "streamlit", "run", "redteamci/dashboard.py"]
-    command.extend(args.streamlit_args or [])
+    streamlit_args = list(args.streamlit_args or [])
+    if streamlit_args[:1] == ["--"]:
+        streamlit_args = streamlit_args[1:]
+    command.extend(streamlit_args)
     return subprocess.call(command)
 
 
@@ -703,6 +721,7 @@ def story_command(args: argparse.Namespace) -> int:
         load_support_story_state,
         load_support_story_trace,
         prepare_support_story_workspace,
+        run_support_story_claude_code_remediation,
         run_full_support_story_local,
         run_support_story_green_local,
         run_support_story_red_local,
@@ -731,6 +750,13 @@ def story_command(args: argparse.Namespace) -> int:
         return 0
     if args.step == "remediate":
         result = apply_support_story_remediation()
+        return _print_story_result(result, args)
+    if args.step == "claude-code-remediate":
+        result = run_support_story_claude_code_remediation(
+            strict_claude_code=args.strict_claude_code,
+            fixture_fallback=True,
+            mode=args.mode,
+        )
         return _print_story_result(result, args)
     if args.step == "green":
         result = run_support_story_green_local()
@@ -763,6 +789,7 @@ def _print_story_result(
 ) -> int:
     summary_path = getattr(result, "summary_path", None)
     proof = getattr(result, "proof", None)
+    details = getattr(result, "details", None)
     if args.json:
         print(
             json.dumps(
@@ -771,6 +798,7 @@ def _print_story_result(
                     "ok": bool(getattr(result, "ok", False)),
                     "summary_path": str(summary_path) if summary_path else None,
                     "proof": proof,
+                    "details": details,
                 },
                 indent=2,
             )
@@ -782,6 +810,8 @@ def _print_story_result(
             print(f"Summary: {summary_path}")
         if proof:
             _print_support_story_proof(proof)
+        if isinstance(details, dict) and details:
+            _print_story_details(details)
     if args.github_annotations:
         for annotation in getattr(result, "annotations", None) or []:
             print(annotation)
@@ -789,6 +819,29 @@ def _print_story_result(
         summary = load_summary(summary_path) if summary_path else {}
         return 1 if int(summary.get("failed", 0)) else 0
     return 0 if bool(getattr(result, "ok", False)) else 1
+
+
+def _print_story_details(details: dict[str, Any]) -> None:
+    if details.get("source"):
+        print(f"Source: {details.get('source')}")
+    print(f"Live Claude proposal applied: {details.get('live_claude_proposal_applied')}")
+    print(f"Fixture fallback used: {details.get('fixture_fallback_used')}")
+    if details.get("prompt_path"):
+        print(f"Claude prompt: {details['prompt_path']}")
+    if details.get("raw_output_path"):
+        print(f"Claude raw output: {details['raw_output_path']}")
+    if details.get("proposal_path"):
+        print(f"Claude proposal: {details['proposal_path']}")
+    if details.get("validation_error_path"):
+        print(f"Claude validation errors: {details['validation_error_path']}")
+    if details.get("summary_path"):
+        print(f"Patch summary: {details['summary_path']}")
+    if details.get("diff_path"):
+        print(f"Patch diff: {details['diff_path']}")
+    if details.get("regression_test_path"):
+        print(f"Regression test: {details['regression_test_path']}")
+    if details.get("error"):
+        print(f"Error: {details['error']}")
 
 
 def _print_story_state(state: dict[str, Any], artifacts: dict[str, str]) -> None:

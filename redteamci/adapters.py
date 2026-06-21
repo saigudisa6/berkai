@@ -33,6 +33,7 @@ class CLIAgentError(AgentAdapterError):
 @dataclass(frozen=True)
 class AgentConfig:
     kind: str = "builtin"
+    name: str | None = None
     url: str | None = None
     command: str | list[str] | tuple[str, ...] | None = None
     cwd: str | None = None
@@ -42,6 +43,8 @@ class AgentConfig:
 
     @property
     def label(self) -> str:
+        if self.name:
+            return self.name
         if self.kind == "http":
             return f"http:{self.url or DEFAULT_HTTP_DEMO_URL}"
         if self.kind == "cli":

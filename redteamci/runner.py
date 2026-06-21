@@ -83,6 +83,8 @@ def run_suite(
     remediation_artifact_paths: list[str | Path] | None = None,
     regression_artifact_paths: list[str | Path] | None = None,
     scenario: str | None = None,
+    phase: str | None = None,
+    correlation_id: str | None = None,
 ) -> RunReport:
     guardrails = load_guardrails(guardrails_path)
     agent_config = agent_config or AgentConfig()
@@ -112,6 +114,8 @@ def run_suite(
             remediation_artifact_paths=remediation_artifact_paths,
             regression_artifact_paths=regression_artifact_paths,
             scenario=scenario,
+            phase=phase,
+            correlation_id=correlation_id,
         )
         results.append(result)
 
@@ -156,6 +160,8 @@ def run_attack(
     remediation_artifact_paths: list[str | Path] | None = None,
     regression_artifact_paths: list[str | Path] | None = None,
     scenario: str | None = None,
+    phase: str | None = None,
+    correlation_id: str | None = None,
 ) -> AttackResult:
     agent_config = agent_config or AgentConfig()
     recorder = FlightRecorder(run_id, attack.id, attack.name)
@@ -241,6 +247,10 @@ def run_attack(
         sentry_dangerous_attempted = dangerous_attempted or (
             [risky_tool] if risky_tool else []
         )
+        sentry_attempt_details = _dangerous_tool_attempt_details(
+            recorder.events,
+            risky_tool,
+        )
         sentry_payload = {
             "run_id": run_id,
             "attack_id": attack.id,
@@ -255,8 +265,11 @@ def run_attack(
             "summary_path": summary_path,
             "remediation_artifact_paths": remediation_artifact_paths,
             "regression_artifact_paths": regression_artifact_paths,
+            "dangerous_tool_attempt_details": sentry_attempt_details,
             "scenario": scenario,
             "run_type": mode,
+            "phase": phase,
+            "correlation_id": correlation_id,
         }
         sentry_event_id = capture_failure_if_configured(**sentry_payload)
         if sentry_event_id:
@@ -414,6 +427,33 @@ def _dangerous_tools_blocked(events: list[dict[str, Any]]) -> list[str]:
         if tool and tool not in tools:
             tools.append(tool)
     return tools
+
+
+def _dangerous_tool_attempt_details(
+    events: list[dict[str, Any]],
+    risky_tool: str | None,
+) -> list[dict[str, Any]]:
+    details: list[dict[str, Any]] = []
+    useful_types = {
+        "tool_call_attempted",
+        "tool_call_executed",
+        "tool_call_blocked",
+    }
+    for event in events:
+        if event.get("type") not in useful_types:
+            continue
+        tool = str(event.get("tool", ""))
+        if risky_tool and tool != risky_tool:
+            continue
+        details.append(
+            {
+                "type": event.get("type"),
+                "tool": tool,
+                "args": event.get("args", {}),
+                "reason": event.get("reason", ""),
+            }
+        )
+    return details
 
 
 def _is_dangerous_tool_event(tool: str, args: Any) -> bool:

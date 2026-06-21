@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .sentry_integration import build_failure_event_context, capture_failure_if_configured
+from .sentry_integration import (
+    build_failure_event_context,
+    build_verification_event_context,
+    capture_failure_if_configured,
+    capture_verification_if_configured,
+)
 from .redis_integration import RedisTraceEmitter, write_summary_if_configured
 
 
@@ -18,7 +23,9 @@ def summarize_patch_metric(before: int, after: int) -> dict[str, Any]:
 __all__ = [
     "RedisTraceEmitter",
     "build_failure_event_context",
+    "build_verification_event_context",
     "capture_failure_if_configured",
+    "capture_verification_if_configured",
     "summarize_patch_metric",
     "write_summary_if_configured",
 ]

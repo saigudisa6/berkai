@@ -22,12 +22,16 @@ def build_failure_event_payload(
     summary_path: Path | None = None,
     remediation_artifact_paths: list[str | Path] | None = None,
     regression_artifact_paths: list[str | Path] | None = None,
+    dangerous_tool_attempt_details: list[dict[str, Any]] | None = None,
     scenario: str | None = None,
     run_type: str | None = None,
+    phase: str | None = None,
+    correlation_id: str | None = None,
 ) -> dict[str, Any]:
     attempted_tools = dangerous_tools_attempted or []
     risky_tool = risky_tool_name or (attempted_tools[0] if attempted_tools else "unknown")
     scenario_value = _scenario_value(scenario, run_type)
+    correlation_value = correlation_id or os.environ.get("REDTEAMCI_CORRELATION_ID", "")
     tags = {
         "redteamci": "true",
         "scenario": scenario_value,
@@ -40,6 +44,10 @@ def build_failure_event_payload(
     }
     if run_type:
         tags["run_type"] = run_type
+    if phase:
+        tags["phase"] = phase
+    if correlation_value:
+        tags["correlation_id"] = correlation_value
     if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
         tags["ci_provider"] = "github_actions"
     github_url = _github_run_url()
@@ -50,6 +58,7 @@ def build_failure_event_payload(
         "failure_reason": failure_reason,
         "redacted_attack_payload": redact_secrets(attack_payload),
         "dangerous_tools_attempted": attempted_tools,
+        "dangerous_tool_attempt_details": dangerous_tool_attempt_details or [],
         "trace_path": _path_value(trace_path),
         "blocked_before_execution": blocked_before_execution,
     }
@@ -98,8 +107,11 @@ def capture_failure_if_configured(
     summary_path: Path | None = None,
     remediation_artifact_paths: list[str | Path] | None = None,
     regression_artifact_paths: list[str | Path] | None = None,
+    dangerous_tool_attempt_details: list[dict[str, Any]] | None = None,
     scenario: str | None = None,
     run_type: str | None = None,
+    phase: str | None = None,
+    correlation_id: str | None = None,
 ) -> str | None:
     try:
         dsn = os.environ.get("SENTRY_DSN")
@@ -128,10 +140,99 @@ def capture_failure_if_configured(
                 summary_path=summary_path,
                 remediation_artifact_paths=remediation_artifact_paths,
                 regression_artifact_paths=regression_artifact_paths,
+                dangerous_tool_attempt_details=dangerous_tool_attempt_details,
                 scenario=scenario,
                 run_type=run_type,
+                phase=phase,
+                correlation_id=correlation_id,
             )
         )
+        return str(event_id) if event_id else None
+    except Exception:
+        return None
+
+
+def build_verification_event_payload(
+    *,
+    run_id: str,
+    proof: dict[str, Any],
+    summary_path: Path,
+    remediation_artifact_paths: list[str | Path],
+    regression_artifact_paths: list[str | Path],
+    trace_paths: list[str | Path],
+    scenario: str = "support-story",
+    run_type: str = "support_story_green",
+    phase: str = "green",
+    agent: str = "customer-support-agent-level2",
+    dangerous_tool: str = "issue_refund",
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    correlation_value = correlation_id or os.environ.get("REDTEAMCI_CORRELATION_ID", "")
+    tags = {
+        "redteamci": "true",
+        "scenario": scenario,
+        "phase": phase,
+        "run_type": run_type,
+        "agent": agent,
+        "run_id": run_id,
+        "dangerous_tool": dangerous_tool,
+        "blocked_before_execution": "true",
+    }
+    if correlation_value:
+        tags["correlation_id"] = correlation_value
+    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        tags["ci_provider"] = "github_actions"
+    github_url = _github_run_url()
+    if github_url:
+        tags["github_run_url"] = github_url
+
+    return {
+        "message": "RedTeamCI remediation verified",
+        "level": "info",
+        "tags": tags,
+        "fingerprint": ["redteamci", run_type, dangerous_tool, "verified"],
+        "extra": {
+            "proof": proof,
+            "summary_path": _path_value(summary_path),
+            "remediation_artifact_paths": [
+                _path_value(path) for path in remediation_artifact_paths
+            ],
+            "regression_artifact_paths": [
+                _path_value(path) for path in regression_artifact_paths
+            ],
+            "trace_paths": [_path_value(path) for path in trace_paths],
+        },
+    }
+
+
+def build_verification_event_context(
+    *,
+    event_id: str,
+    **payload_kwargs: Any,
+) -> dict[str, Any]:
+    payload = build_verification_event_payload(**payload_kwargs)
+    return {
+        "event_id": event_id,
+        "tags": payload["tags"],
+        "fingerprint": payload["fingerprint"],
+        "extra": payload["extra"],
+    }
+
+
+def capture_verification_if_configured(**payload_kwargs: Any) -> str | None:
+    try:
+        dsn = os.environ.get("SENTRY_DSN")
+        if not dsn:
+            return None
+
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=os.environ.get("SENTRY_ENVIRONMENT"),
+            release=os.environ.get("SENTRY_RELEASE"),
+        )
+        event_id = sentry_sdk.capture_event(build_verification_event_payload(**payload_kwargs))
         return str(event_id) if event_id else None
     except Exception:
         return None

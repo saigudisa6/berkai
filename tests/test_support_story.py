@@ -1,6 +1,8 @@
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
 
 from redteamci.cli import main
 from redteamci.story import (
@@ -62,6 +64,59 @@ class SupportStoryTest(unittest.TestCase):
             ),
             1,
         )
+
+    def test_claude_code_remediation_fallback_writes_story_artifacts(self) -> None:
+        self.assertEqual(quiet_main(["story", "support", "--step", "prepare"]), 0)
+        with patch("redteamci.claude_code.ClaudeCodeRemediator.executable", return_value=None):
+            code = quiet_main(
+                [
+                    "story",
+                    "support",
+                    "--step",
+                    "claude-code-remediate",
+                    "--fixture-fallback",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        state = load_support_story_state()
+        remediation = state["remediation"]
+        self.assertTrue(state["remediated"])
+        self.assertEqual(remediation["source"], "fixture")
+        self.assertTrue(remediation["fixture_fallback_used"])
+        self.assertFalse(remediation["live_claude_proposal_applied"])
+        for key in [
+            "prompt_path",
+            "validation_error_path",
+            "summary_path",
+            "diff_path",
+            "regression_test_path",
+        ]:
+            self.assertTrue(str(remediation[key]).startswith(".demo/support-story/"))
+            self.assertTrue(Path(remediation[key]).exists())
+        self.assertIn(".demo/support-story/guardrails.yml", remediation["changed_files"])
+
+    def test_claude_code_remediation_strict_fails_without_claude(self) -> None:
+        self.assertEqual(quiet_main(["story", "support", "--step", "prepare"]), 0)
+        with patch("redteamci.claude_code.ClaudeCodeRemediator.executable", return_value=None):
+            code = quiet_main(
+                [
+                    "story",
+                    "support",
+                    "--step",
+                    "claude-code-remediate",
+                    "--strict-claude-code",
+                ]
+            )
+
+        self.assertEqual(code, 1)
+        remediation = load_support_story_state()["remediation"]
+        self.assertEqual(remediation["source"], "claude_code_proposal")
+        self.assertFalse(remediation["fixture_fallback_used"])
+        self.assertFalse(remediation["live_claude_proposal_applied"])
+        self.assertIn("Claude Code CLI is not available", remediation["error"])
+        self.assertTrue(Path(remediation["prompt_path"]).exists())
+        self.assertTrue(Path(remediation["validation_error_path"]).exists())
 
 
 if __name__ == "__main__":

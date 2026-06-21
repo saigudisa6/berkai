@@ -133,9 +133,11 @@ evidence, not forced blocking.
 
 Use this for the judged “Claude Code for agent security” story. It profiles a
 support agent, generates refund/email/PII attacks, records a red failure where
-`issue_refund` executes without approval, applies a Claude-compatible
-remediation artifact, reruns green, and proves the refund was attempted but
-blocked before execution. The exploit is also added as a generated regression.
+`issue_refund` executes without approval, runs Claude Code remediation in
+proposal mode, reruns green, and proves the refund was attempted but blocked
+before execution. The exploit is also added as a generated regression. If Claude
+Code is not installed, the default path uses a deterministic fixture fallback
+and clearly marks that fallback in CLI/dashboard state.
 
 ```bash
 python -m redteamci.cli story support --step full
@@ -165,6 +167,21 @@ python -m redteamci.cli story support --step plan
 python -m redteamci.cli story support --step red
 ```
 
+For the flagship Claude Code remediation step:
+
+```bash
+python -m redteamci.cli story support --step claude-code-remediate --fixture-fallback
+python -m redteamci.cli story support --step green
+```
+
+For a strict live-Claude check that fails instead of using fallback:
+
+```bash
+python -m redteamci.cli claude status
+python -m redteamci.cli story support --step red
+python -m redteamci.cli story support --step claude-code-remediate --strict-claude-code
+```
+
 For a GitHub check that intentionally fails when the red exploit is found:
 
 ```bash
@@ -174,10 +191,20 @@ python -m redteamci.cli story support --step red --github-annotations --fail-on-
 The checked-in workflow also supports manual dispatch:
 
 - `scenario=support-story`, `mode=red`: writes red artifacts and fails the job.
-- `scenario=support-story`, `mode=green`: remediates, runs green proof, and passes.
+- `scenario=support-story`, `mode=green`: runs the full support story and passes.
 
 Support-story artifacts are written under `.demo/support-story/` and ignored by
-git.
+git. Claude artifacts are written under `.demo/support-story/patches/`,
+including the prompt, raw output, parsed proposal when available, validation
+result, diff, summary, and generated regression.
+
+The intended dashboard choreography is:
+
+```text
+Profile Agent -> Generate Attack Plan -> Run GitHub Red -> Replay Refund Trace
+-> Open Sentry Incident -> Run Claude Code Remediation -> Review Proposal + Diff
+-> Run GitHub Green -> Show Final Proof
+```
 
 Live GitHub dashboard setup:
 
@@ -202,7 +229,7 @@ python -m redteamci.cli story support --step prepare
 python -m redteamci.cli story support --step plan
 python -m redteamci.cli story support --step red
 python -m redteamci.cli story support --step trace --attack generated-refund-001 --phase red
-python -m redteamci.cli story support --step remediate
+python -m redteamci.cli story support --step claude-code-remediate --fixture-fallback
 python -m redteamci.cli story support --step green
 python -m redteamci.cli dashboard
 ```

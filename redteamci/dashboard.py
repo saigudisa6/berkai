@@ -24,6 +24,7 @@ from redteamci.paths import (
     PATCHES_ROOT,
     ROOT,
 )
+from redteamci.claude_code import ClaudeCodeRemediator
 from redteamci.github_actions import (
     GitHubActionsError,
     configured_branch,
@@ -168,9 +169,13 @@ def _render_support_story_mode() -> None:
                 "generated-refund-001",
             ]
         )
-    if second_row[2].button("Apply Claude-Compatible Remediation", use_container_width=True):
+    if second_row[2].button("Run Claude Code Remediation", use_container_width=True):
+        run_cli(["story", "support", "--step", "claude-code-remediate"])
+    if second_row[3].button("Use Deterministic Fallback", use_container_width=True):
         run_cli(["story", "support", "--step", "remediate"])
-    if second_row[3].button("Run Local Green Rehearsal", use_container_width=True):
+
+    third_row = st.columns(4)
+    if third_row[0].button("Run Green Proof", use_container_width=True):
         run_cli(["story", "support", "--step", "green"])
 
     left, middle, right = st.columns([1.1, 1.4, 1.5])
@@ -190,7 +195,7 @@ def _render_support_story_mode() -> None:
         st.subheader("Generated Tests")
         _render_support_attack_cards(state["attack_pack"])
         st.subheader("Remediation")
-        _render_support_story_patch(ROOT)
+        _render_support_story_remediation(ROOT, state)
 
     with right:
         st.subheader("Flight Recorder")
@@ -302,19 +307,59 @@ def _render_support_attack_cards(attack_pack: list[dict[str, Any]]) -> None:
             st.json(attack.get("assertions", []))
 
 
-def _render_support_story_patch(root: Path) -> None:
+def _render_support_story_remediation(root: Path, state: dict[str, Any]) -> None:
     story_root = root / SUPPORT_STORY_RELATIVE_ROOT
-    summary = _load_json_object(story_root / "patches" / "support_story_summary.json")
-    diff = _load_text(story_root / "patches" / "support_story.diff")
-    regression = _load_json(story_root / "regressions" / "generated_attacks.json")
+    remediation = state.get("remediation", {})
+    if not isinstance(remediation, dict):
+        remediation = {}
+    summary_path = _root_path(root, remediation.get("summary_path")) or (
+        story_root / "patches" / "support_story_summary.json"
+    )
+    diff_path = _root_path(root, remediation.get("diff_path")) or (
+        story_root / "patches" / "support_story.diff"
+    )
+    regression_path = _root_path(root, remediation.get("regression_test_path")) or (
+        story_root / "regressions" / "generated_attacks.json"
+    )
+    summary = _load_json_object(summary_path)
+    diff = _load_text(diff_path)
+    regression = _load_json(regression_path)
     if not summary and not diff and not regression:
-        st.info("Apply remediation to see the Claude-compatible patch.")
+        st.info("Run remediation to populate Claude Code artifacts.")
         return
+
+    st.caption(
+        "Claude Code available: "
+        + ("yes" if state.get("claude_code_available") else "no")
+    )
     if summary:
-        st.caption(f"Source: {summary.get('source', 'fixture')}")
+        source = str(summary.get("source", remediation.get("source", "fixture")))
+        live = bool(summary.get("live_claude_proposal_applied"))
+        fallback = bool(summary.get("fixture_fallback_used"))
+        if live:
+            st.success("Live Claude Code proposal applied")
+        elif fallback or source == "fixture":
+            st.warning("Deterministic fixture fallback used")
+        else:
+            st.error("Claude Code remediation did not apply")
+        st.caption(f"Source: {source}")
         st.caption(f"Regression: {summary.get('regression_test', {}).get('id', '-')}")
+        changed = summary.get("changed_files", [])
+        if isinstance(changed, list) and changed:
+            st.caption("Changed files: " + ", ".join(str(item) for item in changed))
+
+    _render_text_artifact("Prompt artifact", root, remediation.get("prompt_path"))
+    _render_json_artifact("Raw output artifact", root, remediation.get("raw_output_path"))
+    _render_json_artifact("Parsed proposal JSON", root, remediation.get("proposal_path"))
+    _render_json_artifact(
+        "Validation result",
+        root,
+        remediation.get("validation_error_path"),
+        empty_message="Validation passed",
+    )
     if diff:
-        st.code(diff, language="diff")
+        with st.expander("Diff", expanded=True):
+            st.code(diff, language="diff")
     if regression:
         with st.expander("Generated regression"):
             st.json(regression)
@@ -332,6 +377,38 @@ def _render_actions() -> None:
         run_cli(["rerun", "--expect-pass", "--summary", "after.json"])
     if cols[3].button("Generate Report", use_container_width=True):
         run_cli(["report", "--before", "before.json", "--after", "after.json"])
+
+
+def _render_text_artifact(label: str, root: Path, value: Any) -> None:
+    path = _root_path(root, value)
+    if not path or not path.exists():
+        return
+    text = _load_text(path)
+    if text:
+        with st.expander(label):
+            st.caption(_display_path(path, root))
+            st.code(text)
+
+
+def _render_json_artifact(
+    label: str,
+    root: Path,
+    value: Any,
+    *,
+    empty_message: str | None = None,
+) -> None:
+    path = _root_path(root, value)
+    if not path or not path.exists():
+        if empty_message:
+            st.caption(empty_message)
+        return
+    data = _load_json(path)
+    with st.expander(label):
+        st.caption(_display_path(path, root))
+        if data is None:
+            st.code(_load_text(path) or "")
+        else:
+            st.json(data)
 
 
 def _render_artifacts_tab(root: Path) -> None:
@@ -465,6 +542,7 @@ def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
     green_summary = _load_json_object(story_root / "green" / "summary.json")
     state = _load_json_object(story_root / "state.json") or {}
     proof = state.get("proof") if isinstance(state.get("proof"), dict) else {}
+    remediation = state.get("remediation") if isinstance(state.get("remediation"), dict) else {}
     attack_pack = _load_json(story_root / "plan" / "generated_support_attacks.json")
     if not isinstance(attack_pack, list):
         attack_pack = []
@@ -474,14 +552,29 @@ def load_support_story_dashboard_state(root: Path = ROOT) -> dict[str, Any]:
         "red",
     )
     red_sentry_events = _sentry_events(red_summary) or _run_sentry_events(state, "red")
+    green_verification_ids = _sentry_ids(green_summary, "sentry_verification_event_ids") or _run_sentry_ids(
+        state,
+        "green",
+        "sentry_verification_event_ids",
+    )
+    green_verification_events = _sentry_events_for_key(
+        green_summary,
+        "sentry_verification_events",
+    ) or _run_sentry_events_for_key(state, "green", "sentry_verification_events")
+    executable = ClaudeCodeRemediator().executable()
     return {
         "available": story_root.exists(),
         "state": state,
         "proof": proof,
         "red_summary": red_summary,
         "green_summary": green_summary,
+        "remediation": remediation,
+        "claude_code_available": bool(executable),
+        "claude_code_executable": executable or "",
         "red_sentry_event_ids": red_sentry_event_ids,
         "red_sentry_events": red_sentry_events,
+        "green_sentry_verification_event_ids": green_verification_ids,
+        "green_sentry_verification_events": green_verification_events,
         "attack_pack": attack_pack,
         "artifacts": artifacts,
     }
@@ -567,8 +660,19 @@ def _render_sentry_observability(state: dict[str, Any]) -> None:
         )
         return
 
-    for event_id in event_ids:
-        st.code(event_id)
+    red_ids = _string_list(state.get("red_sentry_event_ids"))
+    verification_ids = _string_list(state.get("green_sentry_verification_event_ids"))
+    if red_ids:
+        st.caption("Red incident event IDs")
+        for event_id in red_ids:
+            st.code(event_id)
+    if verification_ids:
+        st.caption("Remediation verification event IDs")
+        for event_id in verification_ids:
+            st.code(event_id)
+    if not red_ids and not verification_ids:
+        for event_id in event_ids:
+            st.code(event_id)
     if context["open_url"]:
         st.link_button("Open in Sentry", context["open_url"])
 
@@ -592,12 +696,24 @@ def build_sentry_dashboard_context(
     if not isinstance(events, list):
         events = []
     events = [event for event in events if isinstance(event, dict)]
+    verification_events = state.get("green_sentry_verification_events", [])
+    if not isinstance(verification_events, list):
+        verification_events = []
+    verification_events = [
+        event for event in verification_events if isinstance(event, dict)
+    ]
     event_ids = _dedupe(
         [
             *_string_list(state.get("red_sentry_event_ids")),
+            *_string_list(state.get("green_sentry_verification_event_ids")),
             *[
                 str(event.get("event_id"))
                 for event in events
+                if event.get("event_id")
+            ],
+            *[
+                str(event.get("event_id"))
+                for event in verification_events
                 if event.get("event_id")
             ],
         ]
@@ -616,6 +732,7 @@ def build_sentry_dashboard_context(
         "release": environ.get("SENTRY_RELEASE", ""),
         "event_ids": event_ids,
         "events": events,
+        "verification_events": verification_events,
         "tags": tags,
         "fingerprint": fingerprint,
         "artifact_paths": _sentry_artifact_paths(extra),
@@ -624,41 +741,61 @@ def build_sentry_dashboard_context(
 
 
 def _sentry_event_ids(summary: dict[str, Any] | None) -> list[str]:
+    return _sentry_ids(summary, "sentry_event_ids")
+
+
+def _sentry_ids(summary: dict[str, Any] | None, key: str) -> list[str]:
     if not summary:
         return []
     integrations = summary.get("integrations", {})
     if not isinstance(integrations, dict):
         return []
-    event_ids = integrations.get("sentry_event_ids", [])
+    event_ids = integrations.get(key, [])
     if not isinstance(event_ids, list):
         return []
     return [str(event_id) for event_id in event_ids if event_id]
 
 
 def _sentry_events(summary: dict[str, Any] | None) -> list[dict[str, Any]]:
+    return _sentry_events_for_key(summary, "sentry_events")
+
+
+def _sentry_events_for_key(summary: dict[str, Any] | None, key: str) -> list[dict[str, Any]]:
     if not summary:
         return []
     integrations = summary.get("integrations", {})
     if not isinstance(integrations, dict):
         return []
-    events = integrations.get("sentry_events", [])
+    events = integrations.get(key, [])
     if not isinstance(events, list):
         return []
     return [event for event in events if isinstance(event, dict)]
 
 
 def _run_sentry_event_ids(state: dict[str, Any], phase: str) -> list[str]:
+    return _run_sentry_ids(state, phase, "sentry_event_ids")
+
+
+def _run_sentry_ids(state: dict[str, Any], phase: str, key: str) -> list[str]:
     run = state.get(phase, {})
     if not isinstance(run, dict):
         return []
-    return _string_list(run.get("sentry_event_ids"))
+    return _string_list(run.get(key))
 
 
 def _run_sentry_events(state: dict[str, Any], phase: str) -> list[dict[str, Any]]:
+    return _run_sentry_events_for_key(state, phase, "sentry_events")
+
+
+def _run_sentry_events_for_key(
+    state: dict[str, Any],
+    phase: str,
+    key: str,
+) -> list[dict[str, Any]]:
     run = state.get(phase, {})
     if not isinstance(run, dict):
         return []
-    events = run.get("sentry_events", [])
+    events = run.get(key, [])
     if not isinstance(events, list):
         return []
     return [event for event in events if isinstance(event, dict)]
@@ -744,6 +881,13 @@ def _support_story_artifacts(root: Path) -> list[dict[str, str]]:
         ("Green summary", story_root / "green" / "summary.json"),
         ("Patch summary", story_root / "patches" / "support_story_summary.json"),
         ("Patch diff", story_root / "patches" / "support_story.diff"),
+        ("Claude prompt", story_root / "patches" / "support_story_claude_proposal_prompt.txt"),
+        ("Claude raw output", story_root / "patches" / "support_story_claude_proposal_raw.json"),
+        ("Claude proposal", story_root / "patches" / "support_story_claude_proposal.json"),
+        (
+            "Claude validation",
+            story_root / "patches" / "support_story_claude_proposal_validation_errors.json",
+        ),
         ("Regression", story_root / "regressions" / "generated_attacks.json"),
     ]
     for phase in ["red", "green"]:
@@ -1101,6 +1245,16 @@ def _load_text(path: Path) -> str | None:
         return path.read_text(encoding="utf-8")
     except Exception:
         return None
+
+
+def _root_path(root: Path, value: Any) -> Path | None:
+    if value is None:
+        return None
+    text = str(value)
+    if not text:
+        return None
+    path = Path(text)
+    return path if path.is_absolute() else root / path
 
 
 def _display_path(path: Path, root: Path) -> str:
