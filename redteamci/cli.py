@@ -33,7 +33,7 @@ from .paths import (
 )
 from .report import generate_report
 from .runner import RunReport, latest_run_dir, run_suite
-from .summary import write_summary
+from .summary import write_junit_summary, write_summary
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -86,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--expect-fail", action="store_true")
         sub.add_argument("--expect-pass", action="store_true")
         sub.add_argument("--summary")
+        sub.add_argument("--junit")
         sub.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     fix = subparsers.add_parser("fix")
@@ -187,6 +188,8 @@ def run_command(args: argparse.Namespace, rerun: bool = False) -> int:
     )
     if args.summary:
         write_summary(report.summary, args.summary)
+    if args.junit:
+        write_junit_summary(report.summary, args.junit)
     if args.json:
         print(json.dumps(report.summary, indent=2))
     else:

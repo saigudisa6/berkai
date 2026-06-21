@@ -11,6 +11,7 @@ from subprocess import CompletedProcess
 from threading import Thread
 from types import SimpleNamespace
 from unittest.mock import patch
+from xml.etree import ElementTree
 
 from redteamci.adapters import AgentConfig, HTTPAgentError, run_http_agent
 from redteamci.attacks import load_attack_pack, load_generated_attacks
@@ -931,6 +932,84 @@ class RedTeamCITest(unittest.TestCase):
             self.assertNotIn("Browserbase: disabled", report)
             self.assertNotIn("Arize: disabled", report)
             self.assertNotIn("sk-fake", report)
+
+    def test_cli_junit_export_for_run_and_rerun(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            guardrails_path = tmp_path / "guardrails.yml"
+            generated_path = tmp_path / "regressions" / "generated_attacks.json"
+            traces_root = tmp_path / "traces"
+            missing_config = tmp_path / "missing.yml"
+            before_summary = tmp_path / "before.json"
+            after_summary = tmp_path / "after.json"
+            before_junit = tmp_path / "before.junit.xml"
+            after_junit = tmp_path / "after.junit.xml"
+            shutil.copyfile(ROOT / "guardrails.unsafe.yml", guardrails_path)
+
+            before_code = quiet_main(
+                [
+                    "run",
+                    "--config",
+                    str(missing_config),
+                    "--guardrails",
+                    str(guardrails_path),
+                    "--regressions",
+                    str(generated_path),
+                    "--traces-root",
+                    str(traces_root),
+                    "--expect-fail",
+                    "--summary",
+                    str(before_summary),
+                    "--junit",
+                    str(before_junit),
+                ]
+            )
+            self.assertEqual(before_code, 0)
+            before_xml = ElementTree.parse(before_junit).getroot()
+            self.assertEqual(before_xml.tag, "testsuite")
+            self.assertEqual(before_xml.attrib["name"], "RedTeamCI")
+            self.assertEqual(before_xml.attrib["tests"], "4")
+            self.assertEqual(before_xml.attrib["failures"], "3")
+            self.assertEqual(len(before_xml.findall("testcase")), 4)
+            before_failures = before_xml.findall(".//failure")
+            self.assertEqual(len(before_failures), 3)
+            self.assertTrue(
+                any(
+                    "Secret-like content appeared after read_file" in failure.attrib["message"]
+                    for failure in before_failures
+                )
+            )
+
+            patch_doc = load_fixture_patch("pi-003")
+            apply_patch_document(
+                patch_doc,
+                guardrails_path=guardrails_path,
+                regression_tests_root=tmp_path / "regressions",
+            )
+            after_code = quiet_main(
+                [
+                    "rerun",
+                    "--config",
+                    str(missing_config),
+                    "--guardrails",
+                    str(guardrails_path),
+                    "--regressions",
+                    str(generated_path),
+                    "--traces-root",
+                    str(traces_root),
+                    "--expect-pass",
+                    "--summary",
+                    str(after_summary),
+                    "--junit",
+                    str(after_junit),
+                ]
+            )
+            self.assertEqual(after_code, 0)
+            after_xml = ElementTree.parse(after_junit).getroot()
+            self.assertEqual(after_xml.attrib["tests"], "5")
+            self.assertEqual(after_xml.attrib["failures"], "0")
+            self.assertEqual(len(after_xml.findall("testcase")), 5)
+            self.assertEqual(after_xml.findall(".//failure"), [])
 
     def test_optional_custom_release_gate_flow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
