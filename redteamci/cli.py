@@ -39,6 +39,11 @@ from .summary import load_summary, write_junit_summary, write_sarif_summary, wri
 from .trace_viewer import format_trace_timeline, load_trace
 
 
+DEFAULT_GATE_SUMMARY_PATH = Path("before.json")
+DEFAULT_GATE_JUNIT_PATH = Path("before.junit.xml")
+DEFAULT_GATE_SARIF_PATH = Path("before.sarif")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -47,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_command(args)
     if args.command == "rerun":
         return run_command(args, rerun=True)
+    if args.command == "gate":
+        return gate_command(args)
     if args.command == "fix":
         return fix_command(args)
     if args.command == "claude":
@@ -98,6 +105,27 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--junit")
         sub.add_argument("--sarif")
         sub.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
+    gate = subparsers.add_parser("gate")
+    gate.add_argument("--config", default=str(DEFAULT_MANIFEST_PATH))
+    gate.add_argument("--agent")
+    gate.add_argument("--agent-url")
+    gate.add_argument("--guardrails", default=str(DEFAULT_GUARDRAILS_PATH))
+    gate.add_argument("--regressions")
+    gate.add_argument("--attacks", dest="attack_pack")
+    gate.add_argument("--traces-root", default=str(TRACES_ROOT))
+    gate.add_argument("--attack", action="append", dest="attacks")
+    gate.add_argument("--offline", action="store_true", help="Use only local fixtures.")
+    gate.add_argument("--summary", default=str(DEFAULT_GATE_SUMMARY_PATH))
+    gate.add_argument("--junit", default=str(DEFAULT_GATE_JUNIT_PATH))
+    gate.add_argument("--sarif", default=str(DEFAULT_GATE_SARIF_PATH))
+    gate.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    gate.add_argument("--github-annotations", action="store_true")
+    gate.add_argument(
+        "--annotation-level",
+        choices=ANNOTATION_LEVELS,
+        default="error",
+    )
 
     fix = subparsers.add_parser("fix")
     fix.add_argument("attack_id")
@@ -230,6 +258,47 @@ def run_command(args: argparse.Namespace, rerun: bool = False) -> int:
         return 0 if report.failed else 1
     if args.expect_pass:
         return 0 if not report.failed else 1
+    return 1 if report.failed else 0
+
+
+def gate_command(args: argparse.Namespace) -> int:
+    manifest = _load_run_manifest(args.config)
+    guardrails_path = _configured_path(
+        args.guardrails,
+        DEFAULT_GUARDRAILS_PATH,
+        manifest,
+        "guardrails",
+    )
+    regressions_path = _configured_path(
+        args.regressions,
+        GENERATED_REGRESSIONS_PATH,
+        manifest,
+        "regressions",
+    )
+    attack_pack_path = _configured_optional_path(args.attack_pack, manifest, "attacks")
+    agent_config = _agent_config(args, manifest)
+    report = run_suite(
+        guardrails_path=guardrails_path,
+        traces_root=args.traces_root,
+        generated_regressions_path=regressions_path,
+        attack_pack_path=attack_pack_path,
+        selected_attack_ids=args.attacks,
+        agent_config=agent_config,
+        mode="gate",
+    )
+    write_summary(report.summary, args.summary)
+    write_junit_summary(report.summary, args.junit)
+    write_sarif_summary(report.summary, args.sarif)
+    if args.json:
+        print(json.dumps(report.summary, indent=2))
+    else:
+        print_run_report(report, label="gate")
+    if args.github_annotations:
+        for annotation in render_github_annotations(
+            report.summary,
+            level=args.annotation_level,
+        ):
+            print(annotation)
     return 1 if report.failed else 0
 
 
@@ -509,8 +578,13 @@ def trace_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def print_run_report(report: RunReport, *, rerun: bool = False) -> None:
-    label = "rerun" if rerun else "run"
+def print_run_report(
+    report: RunReport,
+    *,
+    rerun: bool = False,
+    label: str | None = None,
+) -> None:
+    label = label or ("rerun" if rerun else "run")
     print(f"RedTeamCI {report.run_id} ({label})")
     print(f"Agent: {report.summary.get('integrations', {}).get('agent', 'builtin')}")
     print()

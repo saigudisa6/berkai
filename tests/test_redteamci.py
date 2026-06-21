@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -47,6 +48,15 @@ def capture_main(argv: list[str]) -> tuple[int, str]:
     with redirect_stdout(stdout):
         code = main(argv)
     return code, stdout.getvalue()
+
+
+def capture_main_in_cwd(argv: list[str], cwd: Path) -> tuple[int, str]:
+    previous = Path.cwd()
+    try:
+        os.chdir(cwd)
+        return capture_main(argv)
+    finally:
+        os.chdir(previous)
 
 
 def start_test_server(handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
@@ -1359,6 +1369,148 @@ class RedTeamCITest(unittest.TestCase):
             after_run = after_sarif_data["runs"][0]
             self.assertEqual(len(after_run["tool"]["driver"]["rules"]), 5)
             self.assertEqual(after_run["results"], [])
+
+    def test_cli_gate_unsafe_writes_default_artifacts_and_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            guardrails_path = tmp_path / "guardrails.yml"
+            generated_path = tmp_path / "regressions" / "generated_attacks.json"
+            traces_root = tmp_path / "traces"
+            missing_config = tmp_path / "missing.yml"
+            before_summary = tmp_path / "before.json"
+            before_junit = tmp_path / "before.junit.xml"
+            before_sarif = tmp_path / "before.sarif"
+            shutil.copyfile(ROOT / "guardrails.unsafe.yml", guardrails_path)
+
+            code, stdout = capture_main_in_cwd(
+                [
+                    "gate",
+                    "--config",
+                    str(missing_config),
+                    "--guardrails",
+                    str(guardrails_path),
+                    "--regressions",
+                    str(generated_path),
+                    "--traces-root",
+                    str(traces_root),
+                ],
+                tmp_path,
+            )
+
+            self.assertEqual(code, 1)
+            self.assertIn("(gate)", stdout)
+            self.assertTrue(before_summary.exists())
+            self.assertTrue(before_junit.exists())
+            self.assertTrue(before_sarif.exists())
+            summary = json.loads(before_summary.read_text(encoding="utf-8"))
+            self.assertEqual(summary["failed"], 3)
+            self.assertFalse(summary["certified"])
+
+            junit = ElementTree.parse(before_junit).getroot()
+            self.assertEqual(junit.attrib["tests"], "4")
+            self.assertEqual(junit.attrib["failures"], "3")
+
+            sarif = json.loads(before_sarif.read_text(encoding="utf-8"))
+            run = sarif["runs"][0]
+            self.assertEqual(len(run["results"]), 3)
+
+    def test_cli_gate_github_annotations_emits_error_annotations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            guardrails_path = tmp_path / "guardrails.yml"
+            generated_path = tmp_path / "regressions" / "generated_attacks.json"
+            traces_root = tmp_path / "traces"
+            missing_config = tmp_path / "missing.yml"
+            before_summary = tmp_path / "before.json"
+            before_junit = tmp_path / "before.junit.xml"
+            before_sarif = tmp_path / "before.sarif"
+            shutil.copyfile(ROOT / "guardrails.unsafe.yml", guardrails_path)
+
+            code, stdout = capture_main_in_cwd(
+                [
+                    "gate",
+                    "--config",
+                    str(missing_config),
+                    "--guardrails",
+                    str(guardrails_path),
+                    "--regressions",
+                    str(generated_path),
+                    "--traces-root",
+                    str(traces_root),
+                    "--attack",
+                    "pi-003",
+                    "--github-annotations",
+                    "--annotation-level",
+                    "error",
+                ],
+                tmp_path,
+            )
+
+            self.assertEqual(code, 1)
+            annotations = [
+                line for line in stdout.splitlines() if line.startswith("::error ")
+            ]
+            self.assertEqual(len(annotations), 1)
+            self.assertIn(
+                "title=RedTeamCI failed%3A pi-003 Browser Hidden Injection",
+                annotations[0],
+            )
+            self.assertIn(
+                "Reason: Secret-like content appeared after read_file",
+                annotations[0],
+            )
+            self.assertIn(
+                "Trace replay: python -m redteamci.cli trace pi-003",
+                annotations[0],
+            )
+            self.assertNotIn("sk-fake", annotations[0])
+            self.assertNotIn("hunter2", annotations[0])
+
+    def test_cli_gate_certified_state_writes_artifacts_and_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            guardrails_path = tmp_path / "guardrails.yml"
+            generated_root = tmp_path / "regressions"
+            generated_path = generated_root / "generated_attacks.json"
+            traces_root = tmp_path / "traces"
+            missing_config = tmp_path / "missing.yml"
+            before_summary = tmp_path / "before.json"
+            before_junit = tmp_path / "before.junit.xml"
+            before_sarif = tmp_path / "before.sarif"
+            shutil.copyfile(ROOT / "guardrails.unsafe.yml", guardrails_path)
+            apply_patch_document(
+                load_fixture_patch("pi-003"),
+                guardrails_path=guardrails_path,
+                regression_tests_root=generated_root,
+            )
+
+            code, _ = capture_main_in_cwd(
+                [
+                    "gate",
+                    "--config",
+                    str(missing_config),
+                    "--guardrails",
+                    str(guardrails_path),
+                    "--regressions",
+                    str(generated_path),
+                    "--traces-root",
+                    str(traces_root),
+                ],
+                tmp_path,
+            )
+
+            self.assertEqual(code, 0)
+            summary = json.loads(before_summary.read_text(encoding="utf-8"))
+            self.assertTrue(summary["certified"])
+            self.assertEqual(summary["failed"], 0)
+            self.assertEqual(summary["generated_regressions_loaded"], 1)
+
+            junit = ElementTree.parse(before_junit).getroot()
+            self.assertEqual(junit.attrib["tests"], "5")
+            self.assertEqual(junit.attrib["failures"], "0")
+
+            sarif = json.loads(before_sarif.read_text(encoding="utf-8"))
+            self.assertEqual(sarif["runs"][0]["results"], [])
 
     def test_github_summary_rendering_includes_gate_evidence(self) -> None:
         before = {

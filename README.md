@@ -22,6 +22,7 @@ Use this when the `claude` CLI is installed:
 
 ```bash
 python -m redteamci.cli reset
+python -m redteamci.cli gate --github-annotations
 python -m redteamci.cli run --expect-fail --summary before.json --junit before.junit.xml --sarif before.sarif
 python -m redteamci.cli trace pi-003 --run-id run_001
 python -m redteamci.cli fix pi-003 --claude-code --apply
@@ -75,7 +76,13 @@ python -m redteamci.cli github-annotations --summary before.json
 python -m redteamci.cli dashboard
 ```
 
-Use `--junit path/to/results.xml` on `run` or `rerun` to publish
+Run the bounded CI gate directly when you want failed attacks to fail the job:
+
+```bash
+python -m redteamci.cli gate --github-annotations
+```
+
+Use `--junit path/to/results.xml` on `run`, `rerun`, or `gate` to publish
 pytest-style CI artifacts with one testcase per attack. Use
 `--sarif path/to/results.sarif` to publish SARIF 2.1.0 security evidence with
 one result per failed attack and trace links when available.
@@ -88,18 +95,15 @@ append the same Markdown to `$GITHUB_STEP_SUMMARY` without extra permissions.
 The checked-in workflow uploads this summary artifact and shows it directly on
 the workflow summary page.
 
-For a real security gate in GitHub Actions, print clickable annotations after
-the run while preserving the original exit status:
+For a real security gate in GitHub Actions, run `gate` directly:
 
 ```bash
-python -m redteamci.cli run --summary before.json --junit before.junit.xml --sarif before.sarif || status=$?
-python -m redteamci.cli github-annotations --summary before.json
-exit ${status:-0}
+python -m redteamci.cli gate --github-annotations
 ```
 
-`github-annotations` emits one secret-redacted workflow command per failed
-attack, with trace-file links and replay commands. It does not require extra
-GitHub permissions.
+`gate` writes `before.json`, `before.junit.xml`, and `before.sarif` by default,
+exits nonzero for failed attacks, and can emit one secret-redacted workflow
+annotation per failed attack. It does not require extra GitHub permissions.
 
 Replay a saved flight-recorder trace in CI or demo terminals:
 
