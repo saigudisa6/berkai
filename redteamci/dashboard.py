@@ -1079,7 +1079,10 @@ def _render_classic_presenter_mode() -> None:
     readiness = demo_readiness_status(state)
 
     _render_classic_presenter_header(state, readiness)
-    _render_uploaded_agent_intake()
+    uploaded_state = _render_uploaded_agent_intake()
+    if not uploaded_state.get("available"):
+        st.info("Upload an agent to populate the profile, generated attacks, and proof panels.")
+        return
     _render_classic_presenter_actions()
     _render_classic_presenter_stepper()
 
@@ -1142,7 +1145,7 @@ def _render_classic_presenter_header(
         st.info("NO RUN YET: generate demo proof to create the local certification chain.")
 
 
-def _render_uploaded_agent_intake() -> None:
+def _render_uploaded_agent_intake() -> dict[str, Any]:
     if "uploaded_agent_active" not in st.session_state:
         st.session_state["uploaded_agent_active"] = False
     state = (
@@ -1195,6 +1198,7 @@ def _render_uploaded_agent_intake() -> None:
             st.session_state["uploaded_agent_active"] = False
             st.success("Uploaded-agent intake cleared.")
         _render_uploaded_agent_state(state)
+    return state
 
 
 def _render_uploaded_agent_state(state: dict[str, Any]) -> None:
